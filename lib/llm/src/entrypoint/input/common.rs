@@ -15,6 +15,7 @@ use crate::{
     kv_router::{
         DirectRoutingRouter, KvPushRouter, KvRouter, PrefillRouter, metrics::RouterRequestMetrics,
     },
+    lora::LoraFilteredRouter,
     migration::Migration,
     model_card::ModelDeploymentCard,
     namespace::NamespaceFilter,
@@ -116,13 +117,25 @@ fn preprocessed_backend_engine(
     router: LlmPushRouter,
     router_mode: RouterMode,
     chooser: Option<Arc<KvRouter>>,
+    model_manager: &Arc<crate::discovery::ModelManager>,
 ) -> anyhow::Result<ServiceEngine<SingleIn<PreprocessedRequest>, ManyOut<Annotated<LLMEngineOutput>>>>
 {
     let engine: ServiceEngine<_, _> = match router_mode {
         RouterMode::Direct => Arc::new(DirectRoutingRouter::new(router)),
-        RouterMode::Random
-        | RouterMode::RoundRobin
-        | RouterMode::PowerOfTwoChoices
+        RouterMode::Random | RouterMode::RoundRobin => {
+            // Non-KV routing: wrap PushRouter with LoraFilteredRouter for 2-stage routing.
+            // When no LoRAs are registered, the filter is a no-op pass-through.
+            let lora_filter = model_manager
+                .lora_filter()
+                .expect("lora_filter() always returns Some");
+            Arc::new(LoraFilteredRouter::new(
+                router,
+                lora_filter,
+                model_manager.lora_load_estimator().clone(),
+                router_mode,
+            ))
+        }
+        RouterMode::PowerOfTwoChoices
         | RouterMode::LeastLoaded
         | RouterMode::DeviceAwareWeighted => Arc::new(router),
         RouterMode::KV => {
@@ -163,10 +176,11 @@ pub async fn build_preprocessed_routing(
     // OnceLock), which covers the standalone router path as well.
     RouterRequestMetrics::from_component(client.endpoint.component());
 
+    let backend_engine =
+        preprocessed_backend_engine(router, router_mode, chooser, &model_manager)?;
+
     let prefill_router = prefill_chooser
         .unwrap_or_else(|| PrefillRouter::disabled(model_manager, router_mode, enforce_disagg));
-
-    let backend_engine = preprocessed_backend_engine(router, router_mode, chooser)?;
 
     Ok(PreprocessedRouting {
         backend_engine,

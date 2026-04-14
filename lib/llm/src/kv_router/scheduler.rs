@@ -19,6 +19,7 @@ use super::sequence::{
 };
 use crate::discovery::RuntimeConfigWatch;
 use crate::local_model::runtime_config::ModelRuntimeConfig;
+use crate::lora::filter::LoraFilter;
 use anyhow::Result;
 use dynamo_kv_router::{
     PrefillLoadEstimator,
@@ -66,6 +67,7 @@ where
         overlap_scores_refresh: Option<Arc<RF>>,
         overloaded_worker_provider: Option<OverloadedWorkerProvider>,
         worker_type: &'static str,
+        lora_filter: Option<Arc<LoraFilter>>,
     ) -> Result<Self, KvSchedulerError> {
         let initial_workers: HashMap<WorkerId, ModelRuntimeConfig> =
             workers_with_configs.borrow().clone();

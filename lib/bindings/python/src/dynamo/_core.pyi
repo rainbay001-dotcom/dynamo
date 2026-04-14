@@ -1876,6 +1876,7 @@ async def register_model(
     base_model_path: Optional[str] = None,
     worker_type: Optional[WorkerType] = None,
     needs: Optional[List[List[WorkerType]]] = None,
+    max_gpu_lora_count: Optional[int] = None,
 ) -> None:
     """
     Attach the model at path to the given endpoint, and advertise it as model_type.
