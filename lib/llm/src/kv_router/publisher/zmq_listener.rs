@@ -30,6 +30,10 @@ pub(super) async fn start_zmq_listener(
     );
 
     let warning_count = Arc::new(AtomicU32::new(0));
+    // Propagates vLLM's first-block-only cache_salt through subsequent
+    // BlockStored events via their parent_block_hash chain. TRT-LLM-style
+    // producers (salt on every event) pass through unchanged.
+    let mut cache_ns_propagator = CacheNamespacePropagator::new();
     let socket = match connect_sub_socket(&zmq_endpoint, Some(&zmq_topic)).await {
         Ok(socket) => socket,
         Err(error) => {
@@ -102,7 +106,8 @@ pub(super) async fn start_zmq_listener(
                 );
 
                 let dp_rank = batch.data_parallel_rank.unwrap_or(0).cast_unsigned();
-                for raw_event in batch.events {
+                for mut raw_event in batch.events {
+                    cache_ns_propagator.process(&mut raw_event);
                     let event_id = next_event_id.fetch_add(1, Ordering::SeqCst);
                     let worker = WorkerWithDpRank::new(worker_id, dp_rank);
                     let event =

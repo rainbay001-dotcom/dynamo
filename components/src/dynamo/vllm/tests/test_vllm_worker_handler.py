@@ -567,3 +567,95 @@ class TestBuildEmbeddingParams:
 
         result = handler._build_embedding_params(mm_data)
         assert result is None
+
+
+# ── cache_salt routing-hint plumbing tests ─────────────────────────
+
+
+class TestCacheSaltPlumbing:
+    """cache_salt from request.routing must flow into vLLM's TokensPrompt.
+
+    vLLM's TokensPrompt and TextPrompt inherit a `cache_salt: NotRequired[str]`
+    field; when set, vLLM's scheduler mixes it into internal block hashes so
+    prefix-cache entries from different tenants don't collide. Dynamo pulls
+    it from the nvext.cache_salt field at the frontend, carries it on the
+    RoutingHints, and the worker handler must forward it.
+    """
+
+    def test_build_prompt_from_request_tokens_includes_cache_salt(self):
+        """TokensPrompt-path _build_prompt_from_request forwards cache_salt."""
+        handler = _make_decode_handler()
+        request = {
+            "token_ids": [1, 2, 3, 4],
+            "multi_modal_data": None,
+        }
+        prompt, _, err = handler._build_prompt_from_request(
+            request, "req-1", None, cache_salt="tenant-A"
+        )
+        assert err is None
+        assert prompt is not None
+        # TokensPrompt is a TypedDict so it subscripts like a dict.
+        assert prompt["cache_salt"] == "tenant-A"
+
+    def test_build_prompt_from_request_tokens_omits_cache_salt_when_none(self):
+        """No cache_salt -> prompt must not carry the key at all."""
+        handler = _make_decode_handler()
+        request = {
+            "token_ids": [1, 2, 3, 4],
+            "multi_modal_data": None,
+        }
+        prompt, _, err = handler._build_prompt_from_request(
+            request, "req-1", None, cache_salt=None
+        )
+        assert err is None
+        assert prompt is not None
+        assert "cache_salt" not in prompt
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_decode_token_mode_forwards_routing_cache_salt(self):
+        """DecodeWorkerHandler._generate_token_mode extracts routing.cache_salt
+        and passes it to _build_prompt_from_request."""
+        handler = _make_decode_handler(disaggregation_mode="AGGREGATED")
+        handler._extract_multimodal_data = AsyncMock(return_value=None)
+        # Short-circuit with an error so we don't need to mock the engine.
+        handler._build_prompt_from_request = MagicMock(
+            return_value=(None, None, {"status": "error", "message": "stop"})
+        )
+        request = {
+            "token_ids": [1, 2, 3, 4],
+            "multi_modal_data": None,
+            "sampling_options": {},
+            "stop_conditions": {},
+            "output_options": {},
+            "routing": {"cache_salt": "tenant-A"},
+        }
+        context = MagicMock()
+        async for _ in handler._generate_token_mode(request, context, "req-1"):
+            pass
+
+        # The handler should have called _build_prompt_from_request with
+        # cache_salt="tenant-A" (keyword arg in the source).
+        _, kwargs = handler._build_prompt_from_request.call_args
+        assert kwargs.get("cache_salt") == "tenant-A"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_decode_token_mode_handles_missing_routing_block(self):
+        """Requests without a routing block must still work (cache_salt=None)."""
+        handler = _make_decode_handler(disaggregation_mode="AGGREGATED")
+        handler._extract_multimodal_data = AsyncMock(return_value=None)
+        handler._build_prompt_from_request = MagicMock(
+            return_value=(None, None, {"status": "error", "message": "stop"})
+        )
+        request = {
+            "token_ids": [1, 2, 3, 4],
+            "multi_modal_data": None,
+            "sampling_options": {},
+            "stop_conditions": {},
+            "output_options": {},
+        }
+        context = MagicMock()
+        async for _ in handler._generate_token_mode(request, context, "req-1"):
+            pass
+
+        _, kwargs = handler._build_prompt_from_request.call_args
+        assert kwargs.get("cache_salt") is None

@@ -190,6 +190,108 @@ pub fn extra_keys_to_block_mm_infos(
     Some(infos)
 }
 
+/// Propagates `cache_namespace` from parent blocks to child `BlockStored`
+/// events that don't carry their own namespace on the wire.
+///
+/// vLLM only stamps `cache_salt` into the FIRST block of a request (see
+/// `_gen_*_extra_hash_keys` in vLLM's `kv_cache_utils.py`), because its block
+/// hash is Merkle-chained through `parent_block_hash` and the salt only has
+/// to be mixed in once. Dynamo's block hash is not parent-chained — salt is
+/// mixed into an XXH3 seed and applied per block — so every stored block must
+/// know its cache_namespace up front or the indexer's `tokens_hash` will
+/// diverge from the router's query-side hash.
+///
+/// This struct is a thin lookup from external block hash to cache_namespace:
+/// maintain one instance per worker's event stream, feed every incoming
+/// `RawKvEvent` through [`Self::process`] before `convert_event`, and the
+/// `cache_namespace` slot on each event will be populated from the parent
+/// chain when the producer (i.e. vLLM) omits it.
+///
+/// TRT-LLM stamps `cache_salt` on every event as a top-level field, so for
+/// the TRT-LLM path the propagator is effectively a no-op that just records
+/// the already-present namespace.
+#[derive(Debug, Default)]
+pub struct CacheNamespacePropagator {
+    // Live map: external block hash -> cache_namespace tagged for that block.
+    // Bounded by number of live blocks on the worker (GPU memory / block_size).
+    by_block: std::collections::HashMap<u64, String>,
+}
+
+impl CacheNamespacePropagator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Apply parent-chain inheritance to a `RawKvEvent` in place and update
+    /// internal state so descendants can inherit too.
+    pub fn process(&mut self, event: &mut RawKvEvent) {
+        match event {
+            RawKvEvent::BlockStored {
+                block_hashes,
+                parent_block_hash,
+                cache_namespace,
+                ..
+            } => {
+                if cache_namespace.is_none()
+                    && let Some(parent) = parent_block_hash
+                    && let Some(inherited) = self.by_block.get(&parent.into_u64())
+                {
+                    *cache_namespace = Some(inherited.clone());
+                }
+                if let Some(ns) = cache_namespace.as_deref() {
+                    for bh in block_hashes.iter() {
+                        self.by_block.insert(bh.into_u64(), ns.to_string());
+                    }
+                }
+            }
+            RawKvEvent::BlockRemoved { block_hashes, .. } => {
+                for bh in block_hashes.iter() {
+                    self.by_block.remove(&bh.into_u64());
+                }
+            }
+            RawKvEvent::AllBlocksCleared => {
+                self.by_block.clear();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.by_block.len()
+    }
+}
+
+/// Extract `cache_salt` from vLLM `BlockStored.extra_keys`.
+///
+/// vLLM only stamps `cache_salt` into the FIRST block's extra_keys tuple
+/// (`extra_keys[0]`). The tuple order is `lora_name + mm_keys + cache_salt +
+/// prompt_embeds_bytes` (see `_gen_*_extra_hash_keys` in vLLM's
+/// `kv_cache_utils.py`). To recover the salt we scan the first block's keys
+/// and pick the plain-string item that is not a 64-char hex MM digest and not
+/// equal to the top-level `lora_name` (passed as `lora_name_hint`).
+///
+/// vLLM's TRT-LLM counterpart stamps `cache_salt` as a top-level field on every
+/// event (see `ZmqKvEventPublisher` in the TRT-LLM publisher), so this helper
+/// is only the vLLM-path fallback.
+pub fn extract_cache_namespace_from_extra_keys(
+    extra_keys: Option<&Vec<Option<Vec<ExtraKeyItem>>>>,
+    lora_name_hint: Option<&str>,
+) -> Option<String> {
+    let first_block_keys = extra_keys?.first()?.as_ref()?;
+    for item in first_block_keys {
+        if let ExtraKeyItem::Hash(s) = item {
+            if parse_mm_hash_from_extra_key(s).is_some() {
+                continue;
+            }
+            if lora_name_hint == Some(s.as_str()) {
+                continue;
+            }
+            return Some(s.clone());
+        }
+    }
+    None
+}
+
 // -------------------------------------------------------------------------
 // Custom deserializer for RawKvEvent --------------------------------------
 // -------------------------------------------------------------------------
@@ -290,19 +392,29 @@ impl<'de> Visitor<'de> for RawKvEventVisitor {
                 };
                 let block_size =
                     block_size.ok_or_else(|| de::Error::missing_field("block_size"))?;
+                let lora_name = lora_name.unwrap_or(None);
+                let extra_keys = extra_keys.unwrap_or(None);
+                // Top-level cache_salt (TRT-LLM style) wins; otherwise fall back
+                // to scanning vLLM's per-block extra_keys.
+                let cache_namespace = cache_namespace.unwrap_or(None).or_else(|| {
+                    extract_cache_namespace_from_extra_keys(
+                        extra_keys.as_ref(),
+                        lora_name.as_deref(),
+                    )
+                });
                 let block_mm_infos = block_mm_infos
                     .unwrap_or(None)
-                    .or_else(|| extra_keys_to_block_mm_infos(extra_keys.unwrap_or(None)));
+                    .or_else(|| extra_keys_to_block_mm_infos(extra_keys));
                 Ok(RawKvEvent::BlockStored {
                     block_hashes,
                     parent_block_hash: parent_block_hash.unwrap_or(None),
                     token_ids: raw_token_ids,
                     block_size,
                     medium: medium.unwrap_or(None),
-                    lora_name: lora_name.unwrap_or(None),
+                    lora_name,
                     block_mm_infos,
                     is_eagle: Some(is_eagle),
-                    cache_namespace: cache_namespace.unwrap_or(None),
+                    cache_namespace,
                 })
             }
             Some("BlockRemoved") => {
@@ -358,6 +470,13 @@ impl<'de> Visitor<'de> for RawKvEventVisitor {
 
                 while seq.next_element::<IgnoredAny>()?.is_some() {}
 
+                // Top-level cache_salt wins; otherwise try vLLM-style extra_keys.
+                let cache_namespace = cache_namespace.or_else(|| {
+                    extract_cache_namespace_from_extra_keys(
+                        extra_keys.as_ref(),
+                        lora_name.as_deref(),
+                    )
+                });
                 let block_mm_infos =
                     block_mm_infos.or_else(|| extra_keys_to_block_mm_infos(extra_keys));
 
@@ -757,6 +876,384 @@ mod tests {
                 assert_eq!(cache_namespace, None);
             }
             other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// vLLM emits cache_salt inside the first block's extra_keys tuple rather
+    /// than as a top-level field; make sure we recover it.
+    #[test]
+    fn test_deserialize_vllm_cache_salt_from_extra_keys_map() {
+        let json = serde_json::json!({
+            "type": "BlockStored",
+            "block_hashes": [100i64, 101i64],
+            "parent_block_hash": null,
+            "token_ids": [1u32, 2, 3, 4, 5, 6, 7, 8],
+            "block_size": 4,
+            "extra_keys": [["tenant-vllm"], null],
+        });
+        let encoded = serde_json::to_vec(&json).unwrap();
+        let event: RawKvEvent = serde_json::from_slice(&encoded).unwrap();
+
+        match event {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => {
+                assert_eq!(cache_namespace.as_deref(), Some("tenant-vllm"));
+            }
+            other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// When a vLLM request uses LoRA, lora_name shows up both as a top-level
+    /// field AND as the first entry of every block's extra_keys tuple. Make
+    /// sure we filter that out and keep only the cache_salt.
+    #[test]
+    fn test_deserialize_vllm_cache_salt_with_lora_filters_lora_name() {
+        let json = serde_json::json!({
+            "type": "BlockStored",
+            "block_hashes": [100i64],
+            "parent_block_hash": null,
+            "token_ids": [1u32, 2, 3, 4],
+            "block_size": 4,
+            "lora_name": "lora-x",
+            "extra_keys": [["lora-x", "tenant-vllm"]],
+        });
+        let encoded = serde_json::to_vec(&json).unwrap();
+        let event: RawKvEvent = serde_json::from_slice(&encoded).unwrap();
+
+        match event {
+            RawKvEvent::BlockStored {
+                cache_namespace,
+                lora_name,
+                ..
+            } => {
+                assert_eq!(lora_name.as_deref(), Some("lora-x"));
+                assert_eq!(cache_namespace.as_deref(), Some("tenant-vllm"));
+            }
+            other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// Multimodal + cache_salt: the 64-char hex MM digest should not be picked
+    /// up as cache_salt, and block_mm_infos should still populate.
+    #[test]
+    fn test_deserialize_vllm_cache_salt_with_mm_hash() {
+        let mm_hash = "0123456789abcdef".repeat(4);
+        assert_eq!(mm_hash.len(), 64);
+        let json = serde_json::json!({
+            "type": "BlockStored",
+            "block_hashes": [100i64],
+            "parent_block_hash": null,
+            "token_ids": [1u32, 2, 3, 4],
+            "block_size": 4,
+            "extra_keys": [[mm_hash.clone(), "tenant-vllm"]],
+        });
+        let encoded = serde_json::to_vec(&json).unwrap();
+        let event: RawKvEvent = serde_json::from_slice(&encoded).unwrap();
+
+        match event {
+            RawKvEvent::BlockStored {
+                cache_namespace,
+                block_mm_infos,
+                ..
+            } => {
+                assert_eq!(cache_namespace.as_deref(), Some("tenant-vllm"));
+                let infos = block_mm_infos.expect("mm infos present");
+                let first = infos[0].as_ref().expect("first block has mm info");
+                assert_eq!(first.mm_objects.len(), 1);
+            }
+            other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// Top-level cache_salt must win over extra_keys fallback (TRT-LLM path).
+    #[test]
+    fn test_deserialize_top_level_cache_salt_wins_over_extra_keys() {
+        let json = serde_json::json!({
+            "type": "BlockStored",
+            "block_hashes": [100i64],
+            "parent_block_hash": null,
+            "token_ids": [1u32, 2, 3, 4],
+            "block_size": 4,
+            "cache_salt": "winner",
+            "extra_keys": [["loser"]],
+        });
+        let encoded = serde_json::to_vec(&json).unwrap();
+        let event: RawKvEvent = serde_json::from_slice(&encoded).unwrap();
+
+        match event {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => {
+                assert_eq!(cache_namespace.as_deref(), Some("winner"));
+            }
+            other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// vLLM's msgspec emits events as tuples (array_like=True). Verify the
+    /// sequence visitor also falls back to extra_keys.
+    #[test]
+    fn test_deserialize_vllm_cache_salt_from_extra_keys_seq() {
+        // Tuple layout: (tag, block_hashes, parent_block_hash, token_ids,
+        //                block_size, lora_id, medium, lora_name, extra_keys)
+        let raw_event = (
+            "BlockStored",
+            vec![BlockHashValue::Unsigned(42)],
+            Option::<BlockHashValue>::None,
+            vec![1u32, 2, 3, 4],
+            4usize,
+            Option::<u64>::None,  // lora_id (deprecated)
+            Option::<String>::None, // medium
+            Option::<String>::None, // lora_name
+            Some(vec![Some(vec![ExtraKeyItemForTest::S(
+                "tenant-seq".to_string(),
+            )])]),
+        );
+        let encoded = rmp_serde::to_vec(&raw_event).unwrap();
+        let event: RawKvEvent = rmp_serde::from_slice(&encoded).unwrap();
+
+        match event {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => {
+                assert_eq!(cache_namespace.as_deref(), Some("tenant-seq"));
+            }
+            other => panic!("expected BlockStored, got {other:?}"),
+        }
+    }
+
+    /// Helper wrapper to serialize an `ExtraKeyItem::Hash` via msgpack in tests
+    /// without pulling in `Serialize` on the production enum.
+    #[derive(serde::Serialize)]
+    #[serde(untagged)]
+    enum ExtraKeyItemForTest {
+        S(String),
+    }
+
+    fn stored(
+        block_hashes: Vec<u64>,
+        parent: Option<u64>,
+        cache_namespace: Option<&str>,
+    ) -> RawKvEvent {
+        RawKvEvent::BlockStored {
+            block_hashes: block_hashes
+                .into_iter()
+                .map(BlockHashValue::Unsigned)
+                .collect(),
+            parent_block_hash: parent.map(BlockHashValue::Unsigned),
+            token_ids: vec![0u32; 4],
+            block_size: 4,
+            medium: None,
+            lora_name: None,
+            block_mm_infos: None,
+            is_eagle: Some(false),
+            cache_namespace: cache_namespace.map(str::to_owned),
+        }
+    }
+
+    /// Child BlockStored without its own namespace must inherit from parent.
+    #[test]
+    fn test_propagator_inherits_from_parent() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut first = stored(vec![10, 11], None, Some("tenant-A"));
+        prop.process(&mut first);
+        match &first {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("tenant-A")),
+            _ => panic!(),
+        }
+
+        let mut second = stored(vec![12], Some(11), None);
+        prop.process(&mut second);
+        match &second {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("tenant-A")),
+            _ => panic!(),
+        }
+
+        // Grandchild chain should still inherit.
+        let mut third = stored(vec![13], Some(12), None);
+        prop.process(&mut third);
+        match &third {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("tenant-A")),
+            _ => panic!(),
+        }
+    }
+
+    /// Events without any namespace stay unnamespaced.
+    #[test]
+    fn test_propagator_no_namespace_is_noop() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut first = stored(vec![20, 21], None, None);
+        prop.process(&mut first);
+        let mut second = stored(vec![22], Some(21), None);
+        prop.process(&mut second);
+
+        for ev in &[first, second] {
+            match ev {
+                RawKvEvent::BlockStored {
+                    cache_namespace, ..
+                } => assert_eq!(cache_namespace, &None),
+                _ => panic!(),
+            }
+        }
+    }
+
+    /// Two concurrent chains with different namespaces must not cross over.
+    #[test]
+    fn test_propagator_keeps_separate_chains_isolated() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut a0 = stored(vec![100], None, Some("A"));
+        let mut b0 = stored(vec![200], None, Some("B"));
+        prop.process(&mut a0);
+        prop.process(&mut b0);
+
+        let mut a1 = stored(vec![101], Some(100), None);
+        let mut b1 = stored(vec![201], Some(200), None);
+        prop.process(&mut a1);
+        prop.process(&mut b1);
+
+        match &a1 {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("A")),
+            _ => panic!(),
+        }
+        match &b1 {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("B")),
+            _ => panic!(),
+        }
+    }
+
+    /// Event's own namespace wins over an inherited one (child override).
+    #[test]
+    fn test_propagator_own_namespace_wins() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut first = stored(vec![30], None, Some("tenant-A"));
+        prop.process(&mut first);
+        let mut second = stored(vec![31], Some(30), Some("tenant-B"));
+        prop.process(&mut second);
+        match &second {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("tenant-B")),
+            _ => panic!(),
+        }
+
+        // Grandchild inherits from the overridden namespace.
+        let mut third = stored(vec![32], Some(31), None);
+        prop.process(&mut third);
+        match &third {
+            RawKvEvent::BlockStored {
+                cache_namespace, ..
+            } => assert_eq!(cache_namespace.as_deref(), Some("tenant-B")),
+            _ => panic!(),
+        }
+    }
+
+    /// BlockRemoved should free namespace state so memory doesn't leak.
+    #[test]
+    fn test_propagator_block_removed_cleans_state() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut first = stored(vec![40, 41], None, Some("tenant-A"));
+        prop.process(&mut first);
+        assert_eq!(prop.len(), 2);
+
+        let mut removed = RawKvEvent::BlockRemoved {
+            block_hashes: vec![
+                BlockHashValue::Unsigned(40),
+                BlockHashValue::Unsigned(41),
+            ],
+            medium: None,
+        };
+        prop.process(&mut removed);
+        assert_eq!(prop.len(), 0);
+    }
+
+    /// AllBlocksCleared drops everything.
+    #[test]
+    fn test_propagator_all_blocks_cleared() {
+        let mut prop = CacheNamespacePropagator::new();
+
+        let mut first = stored(vec![50], None, Some("tenant-A"));
+        let mut second = stored(vec![60], None, Some("tenant-B"));
+        prop.process(&mut first);
+        prop.process(&mut second);
+        assert!(prop.len() > 0);
+
+        let mut cleared = RawKvEvent::AllBlocksCleared;
+        prop.process(&mut cleared);
+        assert_eq!(prop.len(), 0);
+    }
+
+    /// After full pipeline (propagator → convert_event), the child block's
+    /// tokens_hash equals what `compute_block_hash_for_seq` would produce with
+    /// the parent's namespace.
+    #[test]
+    fn test_propagator_end_to_end_makes_tokens_hash_salted() {
+        let mut prop = CacheNamespacePropagator::new();
+        let warning_count = Arc::new(AtomicU32::new(0));
+
+        let mut first = RawKvEvent::BlockStored {
+            block_hashes: vec![BlockHashValue::Unsigned(1000)],
+            parent_block_hash: None,
+            token_ids: vec![1u32, 2, 3, 4],
+            block_size: 4,
+            medium: None,
+            lora_name: None,
+            block_mm_infos: None,
+            is_eagle: Some(false),
+            cache_namespace: Some("tenant-A".to_string()),
+        };
+        prop.process(&mut first);
+        let _ =
+            convert_event(first, 0, 4, WorkerWithDpRank::new(1, 0), &warning_count);
+
+        let mut child = RawKvEvent::BlockStored {
+            block_hashes: vec![BlockHashValue::Unsigned(1001)],
+            parent_block_hash: Some(BlockHashValue::Unsigned(1000)),
+            token_ids: vec![5u32, 6, 7, 8],
+            block_size: 4,
+            medium: None,
+            lora_name: None,
+            block_mm_infos: None,
+            is_eagle: Some(false),
+            cache_namespace: None,
+        };
+        prop.process(&mut child);
+
+        let placement = convert_event(
+            child,
+            1,
+            4,
+            WorkerWithDpRank::new(1, 0),
+            &warning_count,
+        );
+        let expected = compute_block_hash_for_seq(
+            &[5, 6, 7, 8],
+            4,
+            BlockHashOptions {
+                cache_namespace: Some("tenant-A"),
+                ..Default::default()
+            },
+        )[0];
+        match placement.event.data {
+            KvCacheEventData::Stored(store) => {
+                assert_eq!(store.blocks[0].tokens_hash, expected);
+            }
+            _ => panic!("expected Stored"),
         }
     }
 

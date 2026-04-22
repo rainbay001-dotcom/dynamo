@@ -1144,13 +1144,16 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
             raise ValueError(f"Failed to decode prompt_embeds as PyTorch tensor: {e}")
 
     def _create_prompt_from_embeddings(
-        self, prompt_embeds_base64: str
+        self,
+        prompt_embeds_base64: str,
+        cache_salt: str | None = None,
     ) -> tuple[EmbedsPrompt, int, torch.Tensor]:
         """
         Decode prompt embeddings and create EmbedsPrompt for vLLM.
 
         Args:
             prompt_embeds_base64: Base64-encoded PyTorch tensor
+            cache_salt: Optional salt for multi-tenant prefix-cache isolation
 
         Returns:
             Tuple of (EmbedsPrompt, sequence_length, tensor) where:
@@ -1174,7 +1177,10 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
             sequence_length = embeddings_tensor.shape[0]
 
         # EmbedsInputs TypedDict has: {type: 'embeds', prompt_embeds: Tensor, cache_salt?: str}
-        prompt = EmbedsPrompt(prompt_embeds=embeddings_tensor)
+        embeds_kwargs: dict[str, Any] = {"prompt_embeds": embeddings_tensor}
+        if cache_salt is not None:
+            embeds_kwargs["cache_salt"] = cache_salt
+        prompt = EmbedsPrompt(**embeds_kwargs)
 
         return prompt, sequence_length, embeddings_tensor
 
@@ -1261,6 +1267,7 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
         request_id: str,
         multi_modal_data: Dict[str, Any] | None,
         log_prefix: str = "",
+        cache_salt: str | None = None,
     ) -> tuple[TokensPrompt | EmbedsPrompt | None, int | None, Dict[str, Any] | None]:
         """
         Build a prompt from request, handling both prompt_embeds and token_ids.
@@ -1270,6 +1277,9 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
             request_id: Request ID for logging
             multi_modal_data: Optional multimodal data to attach to TokensPrompt
             log_prefix: Prefix for log messages (e.g., "Prefill " for prefill requests)
+            cache_salt: Optional salt for multi-tenant prefix-cache isolation.
+                Forwarded to vLLM's TokensPrompt/EmbedsPrompt so vLLM's internal
+                block hashes branch by tenant.
 
         Returns:
             Tuple of (prompt, embedding_sequence_length, error_dict) where:
@@ -1284,7 +1294,9 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
                     prompt,
                     embedding_sequence_length,
                     tensor,
-                ) = self._create_prompt_from_embeddings(request["prompt_embeds"])
+                ) = self._create_prompt_from_embeddings(
+                    request["prompt_embeds"], cache_salt=cache_salt
+                )
                 logger.info(
                     f"{log_prefix}Using prompt embeddings: shape={tensor.shape}, "
                     f"dtype={tensor.dtype}, sequence_length={embedding_sequence_length}, "
@@ -1312,6 +1324,8 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
         )
         if mm_uuids is not None:
             prompt_kwargs["multi_modal_uuids"] = mm_uuids
+        if cache_salt is not None:
+            prompt_kwargs["cache_salt"] = cache_salt
 
         prompt = TokensPrompt(**prompt_kwargs)
         return prompt, embedding_sequence_length, None
@@ -1657,9 +1671,12 @@ class DecodeWorkerHandler(BaseWorkerHandler):
                 request, request_id, context
             )
 
+        routing = request.get("routing") or {}
+        cache_salt = routing.get("cache_salt")
+
         # Build prompt from request (handles both prompt_embeds and token_ids)
         prompt, embedding_sequence_length, error = self._build_prompt_from_request(
-            request, request_id, multi_modal_data
+            request, request_id, multi_modal_data, cache_salt=cache_salt
         )
         if error is not None:
             yield error
@@ -1728,18 +1745,26 @@ class DecodeWorkerHandler(BaseWorkerHandler):
             request, use_tokenizer=True
         )
 
+        routing = request.get("routing") or {}
+        cache_salt = routing.get("cache_salt")
+
         # Build prompt for vLLM
         if isinstance(input_data, list):
-            prompt = TokensPrompt(prompt_token_ids=input_data)
+            tokens_kwargs: dict[str, Any] = {"prompt_token_ids": input_data}
+            if cache_salt is not None:
+                tokens_kwargs["cache_salt"] = cache_salt
+            prompt = TokensPrompt(**tokens_kwargs)
         else:
-            prompt = TextPrompt(prompt=input_data)
+            text_kwargs: dict[str, Any] = {"prompt": input_data}
+            if cache_salt is not None:
+                text_kwargs["cache_salt"] = cache_salt
+            prompt = TextPrompt(**text_kwargs)
 
         # Build sampling params from OpenAI-style request
         sampling_params = build_sampling_params_openai(
             request, self.default_sampling_params
         )
 
-        routing = request.get("routing") or {}
         dp_rank = self._to_local_dp_rank(routing.get("dp_rank"))
         priority = -int(routing.get("priority", 0))
         openai_request_id = request.get("id") or request.get("request_id", request_id)
@@ -1872,9 +1897,16 @@ class PrefillWorkerHandler(BaseWorkerHandler):
         )
         embedding_params = self._build_embedding_params(multi_modal_data or {})
 
+        routing = request.get("routing") or {}
+        cache_salt = routing.get("cache_salt")
+
         # Build prompt from request (handles both prompt_embeds and token_ids)
         prompt, embedding_sequence_length, error = self._build_prompt_from_request(
-            request, request_id, multi_modal_data, log_prefix="Prefill "
+            request,
+            request_id,
+            multi_modal_data,
+            log_prefix="Prefill ",
+            cache_salt=cache_salt,
         )
         if error is not None:
             # Prefill errors need disaggregated_params field

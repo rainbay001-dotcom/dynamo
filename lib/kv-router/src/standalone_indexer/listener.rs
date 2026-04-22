@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocols::{WorkerId, WorkerWithDpRank};
 use crate::recovery::{CursorObservation, CursorState};
-use crate::zmq_wire::{KvEventBatch, convert_event};
+use crate::zmq_wire::{CacheNamespacePropagator, KvEventBatch, convert_event};
 
 use super::indexer::Indexer;
 use super::registry::ListenerRecord;
@@ -40,6 +40,7 @@ struct ListenerLoop {
     watermark: Arc<AtomicU64>,
     warning_count: Arc<AtomicU32>,
     messages_processed: u64,
+    cache_ns_propagator: CacheNamespacePropagator,
 }
 
 impl ListenerLoop {
@@ -65,6 +66,7 @@ impl ListenerLoop {
             watermark,
             warning_count: Arc::new(AtomicU32::new(0)),
             messages_processed: 0,
+            cache_ns_propagator: CacheNamespacePropagator::new(),
         }
     }
 
@@ -153,7 +155,8 @@ impl ListenerLoop {
             let effective_dp_rank = batch
                 .data_parallel_rank
                 .map_or(dp_rank, |rank| rank.cast_unsigned());
-            for raw_event in batch.events {
+            for mut raw_event in batch.events {
+                self.cache_ns_propagator.process(&mut raw_event);
                 let placement_event = convert_event(
                     raw_event,
                     seq,
@@ -222,7 +225,8 @@ impl ListenerLoop {
         let effective_dp_rank = batch
             .data_parallel_rank
             .map_or(self.dp_rank, |rank| rank.cast_unsigned());
-        for raw_event in batch.events {
+        for mut raw_event in batch.events {
+            self.cache_ns_propagator.process(&mut raw_event);
             let placement_event = convert_event(
                 raw_event,
                 seq,
