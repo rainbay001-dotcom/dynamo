@@ -214,7 +214,7 @@ pub struct ImageUrl {
     pub url: Option<Url>,
     pub detail: Option<ImageDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uuid: Option<Uuid>,
+    pub uuid: Option<String>,
 }
 
 #[derive(Clone, Serialize, Default, Debug, Deserialize, PartialEq)]
@@ -414,7 +414,7 @@ pub struct VideoUrl {
     pub url: Option<Url>,
     pub detail: Option<ImageDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uuid: Option<Uuid>,
+    pub uuid: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Builder, PartialEq)]
@@ -437,7 +437,7 @@ pub struct AudioUrl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<Url>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub uuid: Option<Uuid>,
+    pub uuid: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Builder, PartialEq)]
@@ -995,15 +995,26 @@ mod tests {
 
     #[test]
     fn image_url_serialize_uuid_only_omits_url() {
-        use uuid::Uuid;
         let img = ImageUrl {
             url: None,
             detail: None,
-            uuid: Some(Uuid::nil()),
+            uuid: Some("img-aabbccddeeff0011".to_string()),
         };
         let json = serde_json::to_value(&img).unwrap();
         assert!(json.get("url").is_none(), "url field must be omitted when None");
-        assert_eq!(json["uuid"], "00000000-0000-0000-0000-000000000000");
+        assert_eq!(json["uuid"], "img-aabbccddeeff0011");
+    }
+
+    #[test]
+    fn image_url_uuid_accepts_opaque_cache_key() {
+        // The OpenAI cached-MM extension uses an opaque string. Make sure
+        // we accept the `img-<hex>` shape that aiperf emits, NOT a standard
+        // hyphenated UUID.
+        let img = parse_image_url(serde_json::json!({
+            "url": "https://x.example/y.png",
+            "uuid": "img-ac3921de680bb217"
+        }));
+        assert_eq!(img.uuid.as_deref(), Some("img-ac3921de680bb217"));
     }
 
     #[test]

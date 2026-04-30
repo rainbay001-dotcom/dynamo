@@ -873,7 +873,7 @@ async fn test_media_url_uuid_passthrough(
                 .expect("image_url uuids must be present");
             assert_eq!(uuids.len(), expected_uuids_aligned.len());
             for (i, expected) in expected_uuids_aligned.iter().enumerate() {
-                let got = uuids[i].map(|u| u.to_string());
+                let got = uuids[i].clone();
                 let want = expected.map(|s| s.to_string());
                 assert_eq!(got, want, "uuid mismatch at slot {}", i);
             }

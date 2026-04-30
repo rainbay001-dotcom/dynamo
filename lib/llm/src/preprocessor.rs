@@ -447,23 +447,26 @@ impl OpenAIPreprocessor {
                     ChatCompletionRequestUserMessageContentPart::ImageUrl(p) => (
                         "image_url",
                         p.image_url.url.clone(),
-                        p.image_url.uuid,
+                        p.image_url.uuid.clone(),
                     ),
                     ChatCompletionRequestUserMessageContentPart::VideoUrl(p) => (
                         "video_url",
                         p.video_url.url.clone(),
-                        p.video_url.uuid,
+                        p.video_url.uuid.clone(),
                     ),
                     ChatCompletionRequestUserMessageContentPart::AudioUrl(p) => (
                         "audio_url",
                         p.audio_url.url.clone(),
-                        p.audio_url.uuid,
+                        p.audio_url.uuid.clone(),
                     ),
                     _ => continue,
                 };
 
                 let slot_idx = media_map.entry(type_str.to_string()).or_default().len();
-                uuid_map.entry(type_str.to_string()).or_default().push(uuid);
+                uuid_map
+                    .entry(type_str.to_string())
+                    .or_default()
+                    .push(uuid.clone());
 
                 match (url, uuid) {
                     (Some(url_val), _) => {
@@ -554,7 +557,7 @@ impl OpenAIPreprocessor {
                     let image_hashes: Vec<serde_json::Value> = image_uuids
                         .iter()
                         .map(|u| match u {
-                            Some(uuid) => serde_json::Value::String(uuid.to_string()),
+                            Some(uuid) => serde_json::Value::String(uuid.clone()),
                             None => serde_json::Value::Null,
                         })
                         .collect();

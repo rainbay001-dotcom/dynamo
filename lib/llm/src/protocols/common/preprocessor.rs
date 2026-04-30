@@ -117,8 +117,10 @@ pub enum MultimodalData {
     Decoded(RdmaMediaDataDescriptor),
     /// UUID-only multimodal slot — no payload, the backend looks the cache key
     /// up in its mm_processor_cache (vLLM's OpenAI cached-MM extension). Cache
-    /// hit → success; cache miss → backend returns an error response.
-    UuidOnly(uuid::Uuid),
+    /// hit → success; cache miss → backend returns an error response. Opaque
+    /// string per the OpenAI cached-MM contract — NOT necessarily a hyphenated
+    /// UUID; aiperf emits `img-<sha256[:16]>` for example.
+    UuidOnly(String),
 }
 
 // multimodal map containing {mm_part_type: [data...]}
@@ -127,7 +129,7 @@ pub type MultimodalDataMap = std::collections::HashMap<String, Vec<MultimodalDat
 // Per-modality list of optional UUIDs aligned with [`MultimodalDataMap`] entries.
 // Same modality key (`image_url`, `video_url`, `audio_url`); same length/index as
 // `multi_modal_data[modality]`. `None` slots mean "no UUID supplied for this part".
-pub type MultimodalUuidMap = std::collections::HashMap<String, Vec<Option<uuid::Uuid>>>;
+pub type MultimodalUuidMap = std::collections::HashMap<String, Vec<Option<String>>>;
 
 /// [`PreprocessedRequest`] is the internal representation of an LLM request. The [`dynamo.llm-preprocessor`]
 /// crate is responsible for converting request from the public APIs to this internal representation.
