@@ -39,6 +39,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /opt/amazon/aws-ofi-nccl && \
     ldconfig
 
+ARG GDRCOPY_VERSION=2.4.4
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential ca-certificates curl && \
+    mkdir -p /tmp/gdrcopy && cd /tmp/gdrcopy && \
+    curl --retry 3 --retry-delay 2 -fsSL \
+        "https://github.com/NVIDIA/gdrcopy/archive/refs/tags/v${GDRCOPY_VERSION}.tar.gz" \
+        | tar -xz --strip-components=1 && \
+    make -j"$(nproc)" prefix=/usr/local lib_install && \
+    cd / && rm -rf /tmp/gdrcopy && \
+    ldconfig
+
 ENV EFA_VERSION="${EFA_VERSION}"
 
 {% if target == "runtime" %}
