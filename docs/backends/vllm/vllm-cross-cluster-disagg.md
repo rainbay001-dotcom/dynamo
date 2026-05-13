@@ -70,16 +70,16 @@ This guide covers two distinct use cases:
 
 ### Experiment A: Hardware specialization (heterogeneous)
 
-**Prefill cluster: computelab A10 (24 GB VRAM)**
-**Decode cluster: dlcluster H100 NVL (94 GB VRAM)**
-**Inter-cluster RTT: 34ms**
+**Prefill cluster: A10 (24 GB VRAM, compute-dense)**
+**Decode cluster: H100 NVL (94 GB VRAM, memory-bandwidth)**
+**Inter-cluster RTT: ~34ms (cross-datacenter Ethernet)**
 
 Demonstrates that PrfaaS works with mismatched GPU types. The A10 prefill worker sends KV to the H100 decode worker across a genuine inter-datacenter link. Results show functional correctness and provide a baseline for ISL ≤ 8K where A10 VRAM is sufficient.
 
 ### Experiment B: Network overhead isolation (homogeneous hardware)
 
 **Same-DC baseline**: prefill and decode on the same node (in-node PCIe NIXL transfer)
-**Cross-DC test**: prefill on computelab H100 HBM3, decode on dlcluster H100 NVL, 34ms RTT
+**Cross-DC test**: prefill on H100 HBM3 cluster, decode on H100 NVL cluster, ~34ms RTT
 
 Isolates the pure network cost by measuring TTFT delta = cross-DC TTFT − same-DC TTFT. Compare against the theoretical table above to validate your inter-cluster bandwidth.
 
