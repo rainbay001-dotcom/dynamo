@@ -13,7 +13,7 @@ tests/parity/
 ├── common.py                       ← ParseResult, canonical-JSON diff, decode_arguments
 └── parser/
     ├── fixtures/                   ← static YAML, generated from Dynamo as oracle
-    │   └── <family>/PARSER.batch.yaml
+    │   └── <family>/PARSER.batch.yaml         (and per-top-level-case files like PARSER.batch.8.yaml; see Fixture file schema)
     ├── regenerate_fixtures.py      ← (re-)build fixtures by running Dynamo's parser
     │
     ├── dynamo.py                   ← M2 in-process wrapper (PyO3 binding)
@@ -99,7 +99,7 @@ Both servers receive identical chat-completion requests with `structured_outputs
 | **Real tokenizer?** | yes | no | yes |
 | **Real chat template?** | yes | no | yes |
 | **Real HTTP?** | yes | no | yes |
-| **Cost** | (TBD) | ~3 s for 210 tests | ~60 s for 30 tests (server boot dominates) |
+| **Cost** | (TBD) | ~5 s for 1350 tests (693 pass / 545 skip / 112 xfail with sglang skipped locally) | ~60 s for 30 tests (server boot dominates) |
 | **GPU** | yes | none | yes (`--load-format dummy` still allocates ~2.5 GiB) |
 | **CI markers** | (TBD) | `unit, pre_merge, gpu_0` | `e2e, pre_merge, gpu_1` |
 
@@ -117,37 +117,67 @@ They're stacked diagnostics:
 
 ## Current parity status (M2, batch mode)
 
-`✓` = matches the YAML expected output. `X` = divergence recorded
-in `KNOWN_DIVERGENCES` (xfailed, not silenced). `n/a` = the impl has
-no parser registered for that family. `dynamo` rows are always `ok`
-because Dynamo is the regenerator's oracle.
+Each row is one **parser** (one family of input wire format). Each row
+also names the **model(s)** that parser is wired up for — many parsers
+serve more than one model (e.g. `mistral` covers the Mistral series,
+`hermes` covers Hermes-3 + various Llama variants). Columns are the
+sub-case IDs from [`PARSER_CASES.md`](../../lib/parsers/PARSER_CASES.md):
+top-level buckets (`1`, `3`, `9`, `10`) have no sub-cases and use a
+single column; the other buckets (`2`, `4`, `5`, `6`, `7`, `8`) split
+into `.a`–`.d` sub-cases per the per-bucket axes documented in the
+PR description.
 
-| family#impl            |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  | 10  |
-|--------------------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| kimi_k2#dynamo         | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| kimi_k2#vllm           | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |
-| kimi_k2#sglang         | ✓   | ✓   | ✓   |  X  | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |
-| qwen3_coder#dynamo     | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| qwen3_coder#vllm       | ✓   | ✓   | ✓   |  X  |  X  | ✓   | ✓   |  X  | ✓   | ✓   |
-| qwen3_coder#sglang     | ✓   | ✓   | ✓   |  X  |  X  | ✓   | ✓   |  X  | ✓   | ✓   |
-| glm47#dynamo           | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| glm47#vllm             | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |
-| glm47#sglang           | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |
-| deepseek_v3_1#dynamo   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| deepseek_v3_1#vllm     | ✓   | ✓   | ✓   |  X  |  X  | ✓   | ✓   | ✓   | ✓   | ✓   |
-| deepseek_v3_1#sglang   | ✓   | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |  X  | ✓   | ✓   |
-| harmony#dynamo         | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| harmony#vllm           | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| harmony#sglang         |  X  |  X  | ✓   |  X  |  X  |  X  |  X  |  X  | ✓   |  X  |
-| minimax_m2#dynamo      | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| minimax_m2#vllm        | ✓   | ✓   | ✓   |  X  | ✓   | ✓   | ✓   |  X  | ✓   | ✓   |
-| minimax_m2#sglang      | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| nemotron_deci#dynamo   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
-| nemotron_deci#vllm     | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| nemotron_deci#sglang   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   |
+Cell values show divergence from Dynamo (the oracle):
 
-Tally (excluding `dynamo` since it's the oracle): 140 cells against
-the YAML expected — 95 parity, 25 divergence (xfailed), 20 n/a.
+- `✓` — both vLLM and SGLang match Dynamo's expected output.
+- `V` — vLLM diverges (xfailed via `KNOWN_DIVERGENCES`).
+- `S` — SGLang diverges.
+- `VS` — both diverge.
+- `n/a` — **not applicable**: no peer parser registered for that
+  family, OR the sub-case shape doesn't apply to this grammar (e.g.
+  attribute-encoded DSML families have no `4.b` because there's no
+  embedded JSON to malform).
+
+19 parsers total — split into the **Top-N models** we prioritize and
+**Others** wired into the harness for completeness. Both sections sorted
+alphabetically within themselves.
+
+| model | parser | 1 | 2.a | 2.b | 2.c | 2.d | 3 | 4.a | 4.b | 4.c | 4.d | 5.a | 5.b | 5.c | 6.a | 6.b | 6.c | 7.a | 7.b | 7.c | 7.d | 8.a | 8.b | 8.c | 8.d | 9 | 10 |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **Top-N models** |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
+| DeepSeek V4 | deepseek_v4 § | ✓ | ✓ | V | V | ✓ | ✓ | V | n/a | V | ✓ | V | ✓ | V | ✓ | ✓ | n/a | V | ✓ | n/a | n/a | ✓ | V | V | V | ✓ | ✓ |
+| Gemma 4 | gemma4 § | ✓ | ✓ | n/a | V | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | V | V | V | ✓ | ✓ |
+| GLM 5.1 | glm47 | ✓ | ✓ | n/a | V | ✓ | ✓ | VS | n/a | n/a | ✓ | VS | ✓ | VS | ✓ | S | n/a | ✓ | ✓ | n/a | n/a | V | V | V | V | ✓ | ✓ |
+| gpt-oss | harmony † | S | S | n/a | S | S | ✓ | S | S | ✓ | n/a | S | ✓ | S | S | S | ✓ | S | S | S | S | S | S | S | S | ✓ | S |
+| Kimi K2.6 | kimi_k2 | ✓ | ✓ | ✓ | VS | ✓ | ✓ | ✓ | S | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | VS | VS | VS | VS | ✓ | ✓ |
+| MiniMax 2.7 | minimax_m2 | ✓ | ✓ | S | S | ✓ | ✓ | V | n/a | V | V | VS | ✓ | VS | ✓ | ✓ | n/a | V | ✓ | n/a | n/a | ✓ | S | S | S | ✓ | ✓ |
+| Nemotron (DeciLM) | nemotron_deci †§ | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| Qwen 3 Coder | qwen3_coder | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | V | n/a | n/a | ✓ | ✓ | V | ✓ | ✓ | ✓ | n/a | VS | ✓ | n/a | n/a | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Others** |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |
+| DeepSeek V3 | deepseek_v3 | ✓ | ✓ | ✓ | S | ✓ | ✓ | VS | V | VS | VS | VS | ✓ | VS | ✓ | V | V | ✓ | ✓ | ✓ | ✓ | S | ✓ | S | S | ✓ | ✓ |
+| DeepSeek V3.1 | deepseek_v3_1 | ✓ | ✓ | ✓ | S | ✓ | ✓ | VS | V | VS | VS | VS | ✓ | VS | ✓ | ✓ | V | ✓ | ✓ | ✓ | ✓ | S | ✓ | S | S | ✓ | ✓ |
+| DeepSeek V3.2 | deepseek_v3_2 | ✓ | ✓ | VS | VS | ✓ | ✓ | V | n/a | V | ✓ | V | ✓ | V | ✓ | ✓ | n/a | V | ✓ | n/a | n/a | S | VS | VS | VS | ✓ | ✓ |
+| Hermes-3 / Llama variants | hermes | ✓ | ✓ | n/a | V | ✓ | ✓ | ✓ | VS | S | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | S | ✓ | ✓ | ✓ | ✓ | V | ✓ | V | V | ✓ | ✓ |
+| AI21 Jamba | jamba § | ✓ | ✓ | n/a | V | ✓ | ✓ | ✓ | ✓ | V | V | V | ✓ | ✓ | ✓ | ✓ | V | ✓ | ✓ | ✓ | ✓ | V | ✓ | V | V | ✓ | ✓ |
+| Llama 3 (JSON fmt) | llama3_json § | ✓ | V | n/a | V | V | ✓ | V | V | V | n/a | V | n/a | V | ✓ | ✓ | V | ✓ | ✓ | ✓ | ✓ | V | ✓ | V | V | ✓ | V |
+| Mistral series | mistral | S | S | n/a | VS | S | ✓ | VS | VS | V | S | S | ✓ | VS | S | S | V | S | S | S | S | VS | S | VS | V | ✓ | S |
+| Nemotron Nano | nemotron_nano †§ | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| Phi-4 | phi4 § | ✓ | ✓ | n/a | V | ✓ | ✓ | ✓ | ✓ | V | V | V | V | V | ✓ | ✓ | V | ✓ | ✓ | ✓ | V | V | ✓ | V | V | ✓ | ✓ |
+| Llama 4 (pythonic fmt) | pythonic | ✓ | ✓ | n/a | VS | ✓ | ✓ | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | n/a | ✓ | ✓ | ✓ | ✓ | VS | VS | VS | VS | ✓ | ✓ |
+| Qwen 2.5 | qwen25 † | S | S | n/a | S | S | ✓ | ✓ | S | ✓ | S | S | ✓ | ✓ | S | S | ✓ | S | S | S | S | S | S | S | S | ✓ | S |
+
+### Footnotes
+
+† vLLM has no peer parser (or returns `UNAVAILABLE` at runtime, e.g.
+  `harmony#vllm` requires token IDs not text). Cells show SGLang status
+  only when SGLang is wired; otherwise the row is fully `n/a`.
+§ SGLang has no peer detector for this family. Cells show vLLM status
+  only when vLLM is wired; otherwise the row is fully `n/a`.
+
+`nemotron_deci` and `nemotron_nano` carry both daggers (`†§`) — neither
+upstream has a peer parser, so the rows are fully `n/a`. Listed here for
+completeness; Dynamo-only self-parity could be added in a follow-up but
+yields no cross-impl signal.
 
 **Hot columns:**
 - `PARSER.batch.4` (malformed JSON) and `PARSER.batch.5` (missing
@@ -165,9 +195,232 @@ What's **not** covered yet: `PARSER.fmt.*`, `PARSER.xml.*`,
 live in Rust unit tests only and would be added to the YAML corpus
 in follow-up PRs.
 
+## Run the parity harness
+
+One-liner from inside a Dynamo devcontainer:
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 -m pytest tests/parity/parser/test_parity_parser.py
+```
+
+`PYTHONPATH=lib/bindings/python/src` is required — that's where the
+PyO3 binding (`dynamo._core`) lives. Without it every Dynamo case
+skips. vLLM / SGLang packages must also be installed for their cases
+to run (otherwise they skip cleanly).
+
+**Common filters** — pick what to run:
+
+```bash
+# One family across every bucket
+... -k "kimi_k2"
+
+# One sub-case across every family + every impl
+... -k "PARSER.batch.8.b"
+
+# Exactly one (family, sub-case, impl)
+... "tests/parity/parser/test_parity_parser.py::test_parity[kimi_k2/PARSER.batch.8.b#vllm]"
+```
+
+**From the host** (outside the container), wrap the command in
+`docker exec <container> bash -c 'cd /workspace && …'`. Find the
+container with `docker ps --format '{{.Names}}' | grep vsc-dynamo2 | head -1`.
+
+**Baseline:** on `main` post-#9338, expect ~378 passed / ~299 skipped
+/ ~64 xfailed in ~5 s. The **xfailed count is the size of `KNOWN_DIVERGENCES`**
+— perfect parity is when that count is zero (all three impls produce
+byte-identical output on every fixture).
+
+## Resolving divergences (8 steps)
+
+Each non-`✓` cell in the matrix above is an entry in
+`KNOWN_DIVERGENCES` (`tests/parity/parser/test_parity_parser.py`).
+Goal: drive that count to zero. Walk these steps for one cell at a
+time. Worked example: `kimi_k2 / PARSER.batch.8.b → V` (vLLM drops
+trailing text after the wrapper).
+
+### 1. Pick a cell
+
+Any `V` / `S` / `VS` cell from the matrix above.
+
+### 2. Look up the reason + the side-by-side diff
+
+```bash
+grep -A 1 '"vllm", "kimi_k2", "PARSER.batch.8.b"' \
+  tests/parity/parser/test_parity_parser.py
+```
+
+Then open `tests/parity/parser/fixtures/kimi_k2/PARSER.batch.8.yaml`
+and find the `PARSER.batch.8.b:` block. The `TODO(research)` comment
+right after `expected:` is the side-by-side — Dynamo's output vs
+the impl's. **No harness run needed to read it.**
+
+```yaml
+PARSER.batch.8.b:
+  description: Narration after tool call only
+  ref: originated from https://github.com/vllm-project/vllm/.../test_kimi_k2_tool_parser.py#L435
+  model_text: |-
+    <|tool_calls_section_begin|>...
+  expected:
+    calls: [...]
+    normal_text: <Dynamo's output>
+  # TODO(research): vllm diverges — <reason from KNOWN_DIVERGENCES>
+  # vllm produces:
+  #   calls: [...]
+  #   normal_text: <vLLM's actual output>
+```
+
+If the reason is generic (e.g. `"sglang diverges on this sub-case
+(CI-surfaced)"`), the `TODO(research)` block is the *only* place with
+the actual diff — bulk-registered entries skip per-case analysis.
+
+If `ref: originated from <url>` is present, the URL points at the
+upstream vLLM test the shape was derived from (useful context).
+
+### 3. Reproduce locally
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 -m pytest \
+  "tests/parity/parser/test_parity_parser.py::test_parity[kimi_k2/PARSER.batch.8.b#vllm]" \
+  -v --tb=short
+```
+
+Impl tag is `#vllm` or `#sglang`.
+
+### 4. Decide who's right
+
+- **Dynamo wrong, impl right** → fix Dynamo (step 5).
+- **Dynamo right, impl wrong intentionally** → leave the entry, file
+  an upstream bug at `vllm-project/vllm` or `sgl-project/sglang`, link
+  it from the divergence reason.
+- **Both wrong / spec-ambiguous** → discuss before touching code.
+
+### 5. Fix the parser
+
+Edit `lib/parsers/src/tool_calling/<family>/...rs`. Rebuild the PyO3
+binding so the fixture regenerator runs against your change:
+
+```bash
+cd lib/bindings/python && maturin develop --uv && cd -
+```
+
+See [the build guide](../../docs/getting-started/building-from-source.md)
+for prerequisites.
+
+### 6. Regenerate fixtures
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 \
+  -m tests.parity.parser.regenerate_fixtures --overwrite-if-exists
+```
+
+Dynamo is the oracle — your fix changes Dynamo's output, so the
+`expected:` blocks rewrite to match. Skip this and your fix reads as
+a *new* divergence.
+
+### 7. Re-run pytest, watch for XPASS-strict
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 -m pytest \
+  tests/parity/parser/test_parity_parser.py -q --tb=no
+```
+
+If all impls now agree on the cell, the harness flags the registry
+as stale:
+
+```text
+FAILED ...test_parity[kimi_k2/PARSER.batch.8.b#vllm]
+       XPASS-strict: known divergence (vllm,kimi_k2,PARSER.batch.8.b)
+       now matches expected — remove from KNOWN_DIVERGENCES.
+```
+
+### 8. Remove the entry + add spec_ref + refresh comments + commit
+
+Delete the line from `KNOWN_DIVERGENCES`:
+
+```python
+("vllm", "kimi_k2", "PARSER.batch.8.b"): "...",   # ← delete
+```
+
+Add a `spec_ref:` field to the case's INPUTS entry in
+`regenerate_fixtures.py` so the paper trail survives — point at
+whatever made V/S right (spec section, model card, GH issue, upstream
+PR, or the team-decision doc):
+
+```python
+("kimi_k2", "PARSER.batch.8.b"): {
+    "description": "Narration after tool call only",
+    "ref": "originated from https://github.com/vllm-project/vllm/.../test_kimi_k2_tool_parser.py#L435",
+    "spec_ref": "https://platform.moonshot.ai/docs/tool-call-spec#L42  (or GH issue / PR url)",
+    "text": ...,
+    "tools": [...],
+},
+```
+
+Then re-run regen so the field flows into the fixture YAML, and embed
+to drop the now-stale `TODO(research)` block:
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 \
+  -m tests.parity.parser.regenerate_fixtures --overwrite-if-exists
+PYTHONPATH=lib/bindings/python/src python3 \
+  -m tests.parity.parser.embed_divergence_comments
+```
+
+Optionally also leave an inline comment next to the case in the YAML
+for human readers (note: this currently gets dropped on the next
+`regenerate_fixtures` run — preserving it is a follow-up tooling
+item):
+
+```yaml
+PARSER.batch.8.b:
+  description: Narration after tool call only
+  ref: originated from https://...
+  spec_ref: https://...
+  # aligned with V+S+spec on YYYY-MM-DD — was a Dynamo-only divergence;
+  #   parser updated to drop trailing text after wrapper end.
+  model_text: ...
+```
+
+Pytest should now be fully green; cell flips to `✓` on next matrix
+regen.
+
+```bash
+git add lib/parsers/ tests/parity/parser/
+git commit -s -m "fix(parser): align <family> with <impl> on PARSER.batch.N.x"
+git push
+```
+
+## When *not* to fix — permanent divergences
+
+The registry should shrink, not grow. But a few classes stay
+registered forever:
+
+- **`PARSER.batch.4` (malformed args) and `PARSER.batch.5`
+  (missing end-token)** — impl-defined recovery per
+  `PARSER_CASES.md`. Each parser picks its own behavior (drop,
+  recover, fall back to string, error). Parity not expected.
+- **Schema-driven coercion vs parser-layer preservation** —
+  e.g. `{"celsius": "20"}` against `celsius: integer`. Some
+  parsers coerce at the parser layer, others preserve raw and
+  defer coercion downstream. Both defensible.
+
+Everything else is a candidate to fix.
+
 ## Fixture file schema
 
-Each `<family>/PARSER.batch.yaml`:
+Two file layouts coexist per family. The loader merges them:
+
+```
+<family>/PARSER.batch.yaml          ← legacy flat: holds top-level cases (1, 2, ..., 10)
+<family>/PARSER.batch.<n>.yaml      ← per-top-level-case: holds sub-cases <n>.a, <n>.b, ...
+```
+
+The per-case file is only created when a top-level case grows sub-cases.
+Once any sub-case `PARSER.batch.<n>.<sub>` is introduced, the bare
+`PARSER.batch.<n>` key migrates out of the flat file into the per-case
+file. Case-ID uniqueness across the two files is the merge invariant.
+
+Both file shapes use the same schema:
 
 ```yaml
 family: kimi_k2
@@ -185,15 +438,65 @@ cases:
       - name: ...
         arguments: {...}
       normal_text: ''
-  PARSER.batch.2: ...
+  PARSER.batch.8.a:                    # sub-case keys also valid
+    description: Narration before tool call only
+    ref: originated from https://github.com/vllm-project/vllm/blob/<sha>/tests/tool_parsers/test_<family>_tool_parser.py#L<line>
+    model_text: |-
+      ...
+```
+
+The `ref` field is required on per-sub-case files
+(`PARSER.<mode>.<n>.yaml`) and takes one of two forms:
+
+- **`ref: originated from <url>`** — there's an upstream test exercising
+  this same shape on this same family. The fixture's `model_text` may
+  be freshly authored (templated narration, consistent function/args
+  across families) rather than copied verbatim, but the shape is
+  directly traceable to the linked upstream test. The URL names the
+  impl: `vllm-project/vllm` → vLLM, `sgl-project/sglang` → SGLang.
+- **`ref: dynamo`** — authored fresh in this repo, no upstream peer.
+  Most sub-case taxonomy fillers (`.b` post-only, `.d` between-calls)
+  land here because vLLM/SGLang don't test those shapes.
+
+Every sub-case carries one of these two states; there's no "no
+provenance" state. The legacy flat `PARSER.<mode>.yaml` (cases without
+sub-cases) does NOT carry `ref` — those entries predate the convention.
+
+#### Embedded divergence comments
+
+Each per-sub-case fixture for which there's a registered cross-impl
+divergence (`KNOWN_DIVERGENCES` in `test_parity_parser.py`) carries a
+YAML comment block right after the case's `expected:` data showing what
+the diverging impl actually produces, marked `TODO(research)`:
+
+```yaml
+PARSER.batch.8.b:
+  ...
+  expected:
+    calls: [...]
+    normal_text: "Let me know if you need more."     # Dynamo's output
+  # TODO(research): vllm diverges — drops trailing normal_text...
+  # vllm produces:
+  #   calls: [{'name': 'get_weather', 'arguments': {'location': 'Dallas'}}]
+  #   normal_text: None
+```
+
+That way the divergence is visible at the fixture level without running
+the harness, and each one carries an explicit "decide whether to switch"
+prompt. Comments are written by `embed_divergence_comments.py` (run
+after the regenerator, since `yaml.dump` strips comments on rewrite):
+
+```bash
+PYTHONPATH=lib/bindings/python/src python3 -m tests.parity.parser.regenerate_fixtures --overwrite-if-exists
+PYTHONPATH=lib/bindings/python/src python3 -m tests.parity.parser.embed_divergence_comments
 ```
 
 Case keys are the full IDs from
 [`lib/parsers/PARSER_CASES.md`](../../lib/parsers/PARSER_CASES.md)
-(`PARSER.batch.1` … `PARSER.batch.10`). They match the
-`KNOWN_DIVERGENCES` keys and pytest parametrize IDs directly, so a
-single `grep PARSER.batch.5` finds the case across docs, fixtures,
-and Rust source comments.
+(`PARSER.batch.1` … `PARSER.batch.10`, plus sub-cases like
+`PARSER.batch.8.a`). They match the `KNOWN_DIVERGENCES` keys and pytest
+parametrize IDs directly, so a single `grep PARSER.batch.8.a` finds the
+case across docs, fixtures, and Rust source comments.
 
 `model_text` uses YAML's literal block scalar (`|-`) so multi-line
 wire formats (XML-style families, harmony) read as the actual text
@@ -201,27 +504,36 @@ the model would emit, not a `\n`-escaped one-liner. UTF-8 with
 `allow_unicode=True`, so DeepSeek special tokens (`｜` U+FF5C, `▁`
 U+2581) appear as literal characters rather than escape sequences.
 
+A side-effect of letting pyyaml choose the best block-scalar header
+for every value: `normal_text` occasionally emits as the
+unusual-looking `|2+`. Decoding this in three pieces:
+
+- `|` — literal block scalar (preserve newlines as written).
+- `2` — explicit indent indicator: "content is indented 2 spaces."
+  pyyaml normally auto-detects indent from the first content line;
+  it falls back to the explicit form when the body is blank-only
+  and there's nothing to detect from.
+- `+` — "keep" chomping: preserve all trailing newlines (`-` strips
+  them, no indicator clips to one).
+
+So `|2+` followed by one blank line decodes to `"\n"` — a single
+newline. It shows up where the divergence between Dynamo and an
+upstream impl is literally one inter-wrapper newline character (e.g.
+back-to-back `</tool_calls>` / `<tool_calls>` fence pairs where
+Dynamo treats the `\n` between them as `normal_text` and the impl
+treats it as part of the wrapper). pyyaml round-trips the value to
+its canonical form; the header looks cryptic but it's just `"\n"`.
+
 ## Why families' YAMLs look so similar (and why that's the point)
 
 Open any two family files side-by-side and the case shells look
 nearly identical: same `description` strings, same `tools` schemas,
-same case keys `"1"`–`"10"`. **That's by design** — case N is the
-same logical scenario across every family:
+same case keys `"PARSER.batch.1"`–`"PARSER.batch.10"`. **That's by
+design** — `PARSER.batch.N` is the same logical scenario across every
+family (full list in the [Current parity status](#current-parity-status-m2-batch-mode)
+section above).
 
-```
-case 1  =  "single happy-path call"
-case 2  =  "multiple calls"
-case 3  =  "no tool call (plain text)"
-case 4  =  "malformed JSON args"
-case 5  =  "missing end-token recovery"
-case 6  =  "empty args (no-arg call)"
-case 7  =  "complex args (nested JSON / arrays)"
-case 8  =  "interleaved normal text"
-case 9  =  "empty input"
-case 10 =  "duplicate calls (same name twice)"
-```
-
-So a reviewer can grep `PARSER.batch.4` across all 7 families and
+So a reviewer can grep `PARSER.batch.4` across all 10 families and
 immediately see how each parser handles the same scenario. The
 repetition *is* the diff: it's what makes per-case cross-family
 comparison trivial.
@@ -317,7 +629,7 @@ will guide which stages are worth adding when.
 
 Today there's overlap between this harness's fixtures and the
 hand-written Rust unit tests under `lib/parsers/src/tool_calling/*`
-— for the ~70 black-box "given input X, parser returns Y" tests,
+— for the ~190 black-box "given input X, parser returns Y" tests,
 the same input + expected appears in both places (the M2 fixtures
 were originally extracted from those Rust tests by hand).
 
@@ -368,7 +680,7 @@ Effort sketch (separate PRs after M2 + M3 land):
   schema + streaming PyO3 + streaming Rust harness. Roughly
   the size of the original M3 work.
 
-Until then, M2 and the Rust suite both exist; for ~70 cases they
+Until then, M2 and the Rust suite both exist; for ~100 cases they
 test the same Dynamo contract through different surfaces. M2's
 real value-add is the cross-impl half (vLLM and SGLang).
 
