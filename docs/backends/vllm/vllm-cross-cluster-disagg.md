@@ -141,6 +141,28 @@ The Dynamo PrefillRouter load-balances across all registered prefill workers aut
 | `DECODE_GPUS` | No | `0` | Comma-separated GPU indices for decode workers |
 | `DYN_HTTP_PORT` | No | `8000` | Frontend HTTP port |
 
+## Containerized deployment on NIS/LDAP clusters
+
+On clusters where the user is managed by NIS or LDAP (not in the local `/etc/passwd`), the container's `getpwuid()` call fails when running with `--user`. Create a minimal passwd override:
+
+```bash
+# On each cluster node before launching containers
+cat /etc/passwd > /tmp/container-passwd
+echo "$(whoami):x:$(id -u):$(id -g):$(whoami):/tmp:/bin/bash" >> /tmp/container-passwd
+```
+
+Then pass to docker: `-v /tmp/container-passwd:/etc/passwd:ro`
+
+If the cluster uses NIS in `/etc/nsswitch.conf` but the NIS client library is absent in the container:
+
+```bash
+printf 'passwd: files\ngroup: files\n' > /tmp/nsswitch.conf
+```
+
+Pass to docker: `-v /tmp/nsswitch.conf:/etc/nsswitch.conf:ro`
+
+Alternatively, omit `--user` entirely when the model cache is on local NVMe storage (not NFS), since there are no root-squash write restrictions.
+
 ## Benchmarking with AIPerf
 
 To measure cross-cluster TTFT overhead:
@@ -156,6 +178,23 @@ aiperf run \
 ```
 
 Compare against the same-cluster baseline from `disagg.sh` to quantify the NIXL TCP transfer overhead at your target ISL.
+
+### Expected KV transfer overhead by ISL (Qwen3-8B, GQA-8 heads)
+
+| ISL | KV size | Transfer @ 10 Gbps | Transfer @ 1 Gbps |
+|---|---|---|---|
+| 2K tokens | ~150 MB | ~0.12s | ~1.2s |
+| 8K tokens | ~600 MB | ~0.48s | ~4.8s |
+| 16K tokens | ~1.1 GB | ~0.88s | ~8.8s |
+| 32K tokens | ~2.3 GB | ~1.8s | ~18s |
+
+Measured same-DC baseline (TTFT, Qwen3-8B, enforce-eager, H100):
+
+| ISL | TTFT |
+|---|---|
+| ~2K | 1.4s (warm) |
+| ~8K | 5.6s |
+| ~16K | 11.6s |
 
 ## See Also
 
