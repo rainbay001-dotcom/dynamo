@@ -191,6 +191,33 @@ For pre-cached models, set `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` to skip dow
 | `MODEL` | No | `Qwen/Qwen3-0.6B` | HuggingFace model ID |
 | `DECODE_GPUS` | No | `0` | Comma-separated GPU indices for decode workers |
 
+## Troubleshooting
+
+### `EngineDeadError` on first request
+UCX defaulted to RDMA. Set `UCX_TLS=tcp UCX_SOCKADDR_TLS_PRIORITY=tcp NIXL_UCX_TLS=tcp` on **both** prefill and decode workers.
+
+### `CUDA error: unknown error` inside container / `Unable to determine device handle`
+The compute node has a GPU hardware fault at the NVML level. `nvidia-smi` on the bare host may still return clean output — this is a known false negative. Release the allocation and request a new node.
+
+### `Connection refused` on NATS at startup
+The shared NATS/etcd node is down or unreachable. Verify the infra containers are running: `docker ps | grep -E "nats|etcd"` on the infra host.
+
+### `getpwuid` errors / `permission denied` inside container (NIS/LDAP clusters)
+The container cannot resolve your UID because NIS client libraries are absent in the image. Create a minimal `/etc/passwd` entry and override `nsswitch.conf`:
+```bash
+cat /etc/passwd > /tmp/container-passwd
+echo "$(whoami):x:$(id -u):$(id -g):$(whoami):/tmp:/bin/bash" >> /tmp/container-passwd
+printf 'passwd: files\ngroup: files\n' > /tmp/min-nsswitch.conf
+# Then mount both into the container:
+# -v /tmp/container-passwd:/etc/passwd:ro -v /tmp/min-nsswitch.conf:/etc/nsswitch.conf:ro
+```
+
+### `NIXL_ERR_REMOTE_DISCONNECT` on same-node disagg
+`UCX_TLS=tcp` breaks CUDA IPC for same-node KV transfer. Only set UCX TCP overrides for cross-cluster deployments; omit them for single-node disaggregation.
+
+### Decode worker fails with `LlamaForCausalLM failed to be inspected`
+Two workers loading the model from NFS simultaneously can race on config file locks. Add a 10-second stagger between decode worker starts.
+
 ## See Also
 
 - [Disaggregated Serving design doc](../../../docs/design-docs/disagg-serving.md)
