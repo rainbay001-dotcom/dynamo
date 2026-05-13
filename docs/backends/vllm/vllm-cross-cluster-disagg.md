@@ -50,19 +50,19 @@ KV size per token = 32 layers × 2 (K+V) × 8 heads × 128 dim × 2 bytes = **13
 | 16K tokens | **2.0 GB** | 1.64s | 0.66s | 0.16s |
 | 32K tokens | **4.1 GB** | 3.28s | 1.31s | 0.33s |
 
-Plus ~70ms overhead (2 × 34ms RTT) for TCP handshake/ACK on a typical inter-DC link.
+Plus ~70ms overhead (2 × 34ms RTT) for TCP handshake/ACK on a typical inter-datacenter link.
 
-**Use these to validate measured results**: measured TTFT delta (cross-DC − same-DC) should be within ~10–20% of the table values at your measured bandwidth. Large deviations indicate UCX transport misconfiguration or unexpected bottlenecks.
+**Use these to validate measured results**: measured TTFT delta (cross-datacenter − same-datacenter) should be within ~10–20% of the table values at your measured bandwidth. Large deviations indicate UCX transport misconfiguration or unexpected bottlenecks.
 
 ### Model architecture matters
 
-| Model type | KV reduction | Cross-DC Ethernet viable? |
+| Model type | KV reduction | Cross-datacenter Ethernet viable? |
 |---|---|---|
 | Dense attention (Llama-3, DeepSeek-R1-Distill) | 1× | Needs fast fabric at ISL > 8K |
 | GQA (8 KV heads, e.g. Qwen3-8B) | ~4× | Marginal at 10 Gbps for ISL > 16K |
 | Hybrid attention (Kimi Linear, 3:1–7:1 linear:full) | ~36× | Viable over standard Ethernet |
 
-The PrfaaS-PD paper (Qin et al., Moonshot AI + Tsinghua, [arXiv:2604.15039](https://arxiv.org/abs/2604.15039)) first quantified this: hybrid-attention models like Kimi Linear-1T at 128K ISL require only 4.88 Gbps, making cross-DC deployment on commodity 100 Gbps Ethernet practical.
+The PrfaaS-PD paper (Qin et al., Moonshot AI + Tsinghua, [arXiv:2604.15039](https://arxiv.org/abs/2604.15039)) first quantified this: hybrid-attention models like Kimi Linear-1T at 128K ISL require only 4.88 Gbps, making cross-datacenter deployment on commodity 100 Gbps Ethernet practical.
 
 ## Two experiments
 
@@ -78,22 +78,22 @@ Demonstrates that PrfaaS works with mismatched GPU types. The A10 prefill worker
 
 **Measured results** (fresh-prompt TTFT after NIXL warmup, `max_tokens=1`):
 
-| ISL | Cross-cluster TTFT | Same-DC baseline |
+| ISL | Cross-cluster TTFT | Same-datacenter baseline |
 |-----|-------------------|-----------------|
 | ~4K tokens | 0.144s | 3.41s |
 | ~8K tokens | 0.161s | 5.04s |
 | ~16K tokens | 0.281s | — |
 
-Cross-cluster is faster than same-DC here because the same-DC baseline used in-node PCIe NIXL transfer on a PCIe-limited node, while the cross-cluster path uses TCP over a fast campus fabric. The A10 VRAM limit (24 GB) caps usable ISL at ~16K for this model.
+Cross-cluster is faster than same-datacenter here because the same-datacenter baseline used in-node PCIe NIXL transfer on a PCIe-limited node, while the cross-cluster path uses TCP over a fast campus fabric. The A10 VRAM limit (24 GB) caps usable ISL at ~16K for this model.
 
 ### Experiment B: Network overhead isolation (homogeneous hardware)
 
-**Same-DC baseline**: prefill and decode on the same node (in-node PCIe NIXL transfer)
-**Cross-DC test**: prefill on H100 HBM3 cluster, decode on H100 NVL cluster, ~34ms RTT
+**Same-datacenter baseline**: prefill and decode on the same node (in-node PCIe NIXL transfer)
+**Cross-datacenter test**: prefill on H100 HBM3 cluster, decode on H100 NVL cluster, ~34ms RTT
 
-Isolates the pure network cost by measuring TTFT delta = cross-DC TTFT − same-DC TTFT. Compare against the theoretical table above to validate your inter-cluster bandwidth.
+Isolates the pure network cost by measuring TTFT delta = cross-datacenter TTFT − same-datacenter TTFT. Compare against the theoretical table above to validate your inter-cluster bandwidth.
 
-This experiment requires two clusters connected by a genuine inter-DC link (~34ms RTT). Use the KV size table in the previous section to predict expected transfer times and validate your results.
+This experiment requires two clusters connected by a genuine inter-datacenter link (~34ms RTT). Use the KV size table in the previous section to predict expected transfer times and validate your results.
 
 ## Prerequisites
 
@@ -198,7 +198,7 @@ For pre-cached models, set `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1` to skip dow
 | `NATS_SERVER` | Yes | — | Shared NATS URL |
 | `VLLM_NIXL_SIDE_CHANNEL_HOST` | Yes (prefill) | — | Prefill node IP reachable from decode cluster |
 | `VLLM_NIXL_SIDE_CHANNEL_PORT` | No | `20097` | NIXL side channel port |
-| `UCX_TLS` | Yes (cross-DC) | `tcp` | Force TCP transport for cross-cluster NIXL |
+| `UCX_TLS` | Yes (cross-datacenter) | `tcp` | Force TCP transport for cross-cluster NIXL |
 | `HF_HUB_OFFLINE` | Recommended | — | Use cached model without API calls |
 | `MODEL` | No | `Qwen/Qwen3-0.6B` | HuggingFace model ID |
 | `DECODE_GPUS` | No | `0` | Comma-separated GPU indices for decode workers |
