@@ -215,7 +215,6 @@ trtllm_configs = {
             "DYN_LOG": "dynamo_llm::kv_router::publisher=trace,dynamo_kv_router::scheduling::selector=info",
         },
     ),
-    # TODO(OPS-5179): swap pre_merge -> nightly before merge.
     "aggregated_router_approx": TRTLLMConfig(
         name="aggregated_router_approx",
         directory=trtllm_dir,
@@ -223,7 +222,7 @@ trtllm_configs = {
         marks=[
             pytest.mark.gpu_1,
             pytest.mark.trtllm,
-            pytest.mark.pre_merge,
+            pytest.mark.nightly,
             pytest.mark.timeout(300),
         ],
         model="Qwen/Qwen3-0.6B",
@@ -345,7 +344,6 @@ trtllm_configs = {
             "ENCODE_CUDA_VISIBLE_DEVICES": "0",
         },
     ),
-    # TODO(OPS-5179): swap pre_merge -> nightly before merge.
     "e_pd_multimodal_embedding_cache": TRTLLMConfig(
         name="e_pd_multimodal_embedding_cache",
         directory=trtllm_dir,
@@ -355,7 +353,10 @@ trtllm_configs = {
             pytest.mark.gpu_1,
             pytest.mark.trtllm,
             pytest.mark.multimodal,
-            pytest.mark.pre_merge,
+            pytest.mark.nightly,
+            pytest.mark.skip(
+                reason="DYN-3038: PD worker rejects multimodal embedding input"
+            ),
         ],
         model="Qwen/Qwen3-VL-2B-Instruct",
         frontend_port=DefaultPort.FRONTEND.value,
