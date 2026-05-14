@@ -215,6 +215,21 @@ trtllm_configs = {
             "DYN_LOG": "dynamo_llm::kv_router::publisher=trace,dynamo_kv_router::scheduling::selector=info",
         },
     ),
+    # TODO(OPS-5179): swap pre_merge -> nightly before merge.
+    "aggregated_router_approx": TRTLLMConfig(
+        name="aggregated_router_approx",
+        directory=trtllm_dir,
+        script_name="agg_router_approx.sh",
+        marks=[
+            pytest.mark.gpu_1,
+            pytest.mark.trtllm,
+            pytest.mark.pre_merge,
+            pytest.mark.timeout(300),
+        ],
+        model="Qwen/Qwen3-0.6B",
+        frontend_port=DefaultPort.FRONTEND.value,
+        request_payloads=[chat_payload_default()],
+    ),
     "disaggregated_router": TRTLLMConfig(
         name="disaggregated_router",
         directory=trtllm_dir,
@@ -315,6 +330,32 @@ trtllm_configs = {
             pytest.mark.trtllm,
             pytest.mark.multimodal,
             pytest.mark.nightly,
+        ],
+        model="Qwen/Qwen3-VL-2B-Instruct",
+        frontend_port=DefaultPort.FRONTEND.value,
+        timeout=900,
+        delayed_start=120,
+        request_payloads=[
+            multimodal_payload_default(
+                text="Describe what you see in this image.",
+                expected_response=["mountain", "rock", "trees", "road"],
+            )
+        ],
+        env={
+            "ENCODE_CUDA_VISIBLE_DEVICES": "0",
+        },
+    ),
+    # TODO(OPS-5179): swap pre_merge -> nightly before merge.
+    "e_pd_multimodal_embedding_cache": TRTLLMConfig(
+        name="e_pd_multimodal_embedding_cache",
+        directory=trtllm_dir,
+        script_name="disagg_e_pd.sh",
+        script_args=["--multimodal-embedding-cache-capacity-gb", "4"],
+        marks=[
+            pytest.mark.gpu_1,
+            pytest.mark.trtllm,
+            pytest.mark.multimodal,
+            pytest.mark.pre_merge,
         ],
         model="Qwen/Qwen3-VL-2B-Instruct",
         frontend_port=DefaultPort.FRONTEND.value,
