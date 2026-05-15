@@ -51,13 +51,18 @@ The following table shows KV cache sizes (FP8) and estimated TTFT overhead at **
 | Model | Architecture | 4K ISL | 16K ISL | 32K ISL | 64K ISL |
 |-------|-------------|--------|---------|---------|---------|
 | DeepSeek-V4-Flash | Hybrid-sparse | 30 MB (+8ms) | 76 MB (+20ms) | 137 MB (+37ms) | 259 MB (+69ms) |
-| NVIDIA Nemotron-3-Super-120B | Hybrid-linear | 57 MB (+15ms) | 105 MB (+28ms) | 169 MB (+45ms) | 297 MB (+79ms) |
 | DeepSeek-V4-Pro | Hybrid-sparse | 44 MB (+12ms) | 110 MB (+29ms) | 198 MB (+53ms) | 373 MB (+99ms) |
+| NVIDIA Nemotron-3-Super-120B | Hybrid-linear | 57 MB (+15ms) | 105 MB (+28ms) | 169 MB (+45ms) | 297 MB (+79ms) |
 | Qwen3.5-122B-A10B | Hybrid-linear | 195 MB (+52ms) | 339 MB (+90ms) | 531 MB (+142ms) | 915 MB (+244ms) |
+| Qwen3.5-397B-A17B | Hybrid-linear | 243 MB (+65ms) | 423 MB (+113ms) | 663 MB (+177ms) | 1.12 GB (+306ms) |
 | GPT-OSS-120B | Hybrid-SWA | 74 MB (+20ms) | 290 MB (+77ms) | 578 MB (+154ms) | 1.1 GB (+301ms) |
-| DeepSeek-V3 / R1 | MLA | 137 MB (+37ms) | 549 MB (+146ms) | 1.07 GB (+292ms) | 2.14 GB (+584ms) |
+| MiMo-V2.5-Pro | Hybrid-SWA | 119 MB (+32ms) | 419 MB (+112ms) | 819 MB (+218ms) | 1.58 GB (+431ms) |
+| Gemma-4-31B | Hybrid-SWA | 560 MB (+149ms) | 1.02 GB (+279ms) | 1.64 GB (+448ms) | 2.89 GB (+789ms) |
+| DeepSeek-V3 / R1 / Kimi-K2.6 | MLA | 137 MB (+37ms) | 549 MB (+146ms) | 1.07 GB (+292ms) | 2.14 GB (+584ms) |
+| GLM-5.1 | MLA | 216 MB (+58ms) | 863 MB (+230ms) | 1.69 GB (+461ms) | 3.37 GB (+920ms) |
 | Llama-3.1-8B-Instruct | Dense MHA | 256 MB (+68ms) | 1.0 GB (+273ms) | 2.0 GB (+546ms) | 4.0 GB (+1.09s) |
 | Qwen3-235B-A22B | Dense MHA | 376 MB (+100ms) | 1.47 GB (+392ms) | 2.94 GB (+784ms) | 5.88 GB (+1.57s) |
+| MiniMax-M2.7 | Dense MHA | 496 MB (+132ms) | 1.94 GB (+530ms) | 3.88 GB (+1.06s) | 7.75 GB (+2.12s) |
 | Llama-3.1-70B / Qwen2.5-72B | Dense MHA | 640 MB (+171ms) | 2.5 GB (+683ms) | 5.0 GB (+1.37s) | 10 GB (+2.73s) |
 | GLM-4.7 | Dense MHA | 736 MB (+196ms) | 2.88 GB (+768ms) | 5.75 GB (+1.53s) | 11.5 GB (+3.07s) |
 
