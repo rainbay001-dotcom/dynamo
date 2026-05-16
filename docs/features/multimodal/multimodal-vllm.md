@@ -25,6 +25,65 @@ This document provides a comprehensive guide for multimodal inference using vLLM
 | **HTTP/HTTPS** | `http://example.com/image.jpg`       | Remote media files         |
 | **Data URL**   | `data:image/jpeg;base64,/9j/4AAQ...` | Base64-encoded inline data |
 
+### Cached Media UUID Passthrough
+
+Dynamo supports vLLM-compatible cached media UUIDs for OpenAI Chat Completions requests when using the vLLM backend. The optional `uuid` field is placed on the media content part, next to `image_url`, `video_url`, or `audio_url`. Dynamo forwards it to vLLM as `multi_modal_uuids`; vLLM owns the multimodal processor cache and cache eviction behavior. For the upstream contract, see the vLLM documentation on [cached multimodal inputs](https://docs.vllm.ai/en/stable/features/multimodal_inputs/#cached-inputs).
+
+First request: send the media URL with a stable cache key.
+
+```json
+{
+  "model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {
+          "type": "image_url",
+          "image_url": {"url": "https://example.com/image.jpg"},
+          "uuid": "image-123"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Later request: reuse the cached media by sending the same UUID with `image_url: null`.
+
+```json
+{
+  "model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What colors are prominent in the same image?"},
+        {
+          "type": "image_url",
+          "image_url": null,
+          "uuid": "image-123"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The UUID is optional. Existing requests that only send `image_url: {"url": ...}` continue to work unchanged. Cache-only requests require a prior successful request with the same UUID; if vLLM cannot find the cached media, the request fails.
+
+Size vLLM's multimodal processor cache with the standard vLLM argument on the Dynamo vLLM worker:
+
+```bash
+python -m dynamo.vllm \
+  --model Qwen/Qwen2.5-VL-3B-Instruct \
+  --enable-multimodal \
+  --mm-processor-cache-gb 8
+```
+
+Use `--mm-processor-cache-gb 0` only when cached media reuse is not needed.
+
 ## Deployment Patterns
 
 The main multimodal vLLM launchers in this repo are:
