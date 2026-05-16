@@ -465,7 +465,10 @@ impl MediaLoader {
             // cache to stay correct; in practice it's None on the common
             // path so the hit rate is unaffected.
             if media_io_kwargs.is_none()
-                && let Some(url) = image_part.image_url.url.as_ref()
+                && let Some(url) = image_part
+                    .image_url
+                    .as_ref()
+                    .and_then(|image_url| image_url.url.as_ref())
             {
                 let key = Self::cache_key(url.as_str());
                 if let Some(hit) = cache.lock().get(&key) {
@@ -484,12 +487,16 @@ impl MediaLoader {
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("Model does not support image inputs"))?;
 
-                let url = image_part.image_url.url.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "fetch_and_decode_media_part called on uuid-only image part — \
-                         caller must skip uuid-only parts"
-                    )
-                })?;
+                let url = image_part
+                    .image_url
+                    .as_ref()
+                    .and_then(|image_url| image_url.url.as_ref())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "fetch_and_decode_media_part called on uuid-only image part — \
+                             caller must skip uuid-only parts"
+                        )
+                    })?;
                 self.media_fetcher
                     .check_if_url_allowed_with_dns(url)
                     .await?;
@@ -512,12 +519,16 @@ impl MediaLoader {
                             anyhow::anyhow!("Model does not support video inputs")
                         })?;
 
-                    let url = video_part.video_url.url.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "fetch_and_decode_media_part called on uuid-only video part — \
-                             caller must skip uuid-only parts"
-                        )
-                    })?;
+                    let url = video_part
+                        .video_url
+                        .as_ref()
+                        .and_then(|video_url| video_url.url.as_ref())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "fetch_and_decode_media_part called on uuid-only video part — \
+                                 caller must skip uuid-only parts"
+                            )
+                        })?;
                     self.media_fetcher
                         .check_if_url_allowed_with_dns(url)
                         .await?;
@@ -546,7 +557,10 @@ impl MediaLoader {
         if let (Some(cache), ChatCompletionRequestUserMessageContentPart::ImageUrl(image_part)) =
             (self.cache.as_ref(), oai_content_part)
             && media_io_kwargs.is_none()
-            && let Some(url) = image_part.image_url.url.as_ref()
+            && let Some(url) = image_part
+                .image_url
+                .as_ref()
+                .and_then(|image_url| image_url.url.as_ref())
         {
             let key = Self::cache_key(url.as_str());
             let bytes = descriptor_bytes(&rdma_descriptor);
@@ -605,7 +619,10 @@ mod tests {
 
         let image_url = ImageUrl::from(format!("{}/llm-optimize-deploy-graphic.png", server.url()));
         let content_part = ChatCompletionRequestUserMessageContentPart::ImageUrl(
-            ChatCompletionRequestMessageContentPartImage { image_url },
+            ChatCompletionRequestMessageContentPartImage {
+                image_url: Some(image_url),
+                uuid: None,
+            },
         );
 
         let result = loader
@@ -700,7 +717,10 @@ mod tests {
         let url_string = format!("{}/cache-image.png", server.url());
         let image_url = ImageUrl::from(url_string);
         let content_part = ChatCompletionRequestUserMessageContentPart::ImageUrl(
-            ChatCompletionRequestMessageContentPartImage { image_url },
+            ChatCompletionRequestMessageContentPartImage {
+                image_url: Some(image_url),
+                uuid: None,
+            },
         );
 
         // First call — populates cache.
@@ -805,7 +825,10 @@ mod tests {
         let make_part = |path: &str| {
             let image_url = ImageUrl::from(format!("{}{}", server.url(), path));
             ChatCompletionRequestUserMessageContentPart::ImageUrl(
-                ChatCompletionRequestMessageContentPartImage { image_url },
+                ChatCompletionRequestMessageContentPartImage {
+                    image_url: Some(image_url),
+                    uuid: None,
+                },
             )
         };
 

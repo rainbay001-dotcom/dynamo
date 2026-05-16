@@ -612,22 +612,27 @@ fn build_message(text: &str, chunks: &[(&str, usize)]) -> String {
     )
 }
 
-// Helper for cached-MM test: each part is either {url, uuid}, {url}, or {uuid}.
-// `Some(url)` & `Some(uuid)` -> both fields, `Some(url)` only -> url only,
-// `None` & `Some(uuid)` -> uuid-only.
+// Helper for cached-MM test: each part is either {image_url: {url}, uuid},
+// {image_url: {url}}, or {image_url: null, uuid}, matching vLLM's
+// OpenAI-compatible wire shape.
 fn build_message_with_uuids(text: &str, image_parts: &[(Option<&str>, Option<&str>)]) -> String {
     let mut content_parts = vec![format!(r#"{{"type": "text", "text": "{}"}}"#, text)];
     for (url, uuid) in image_parts {
-        let mut fields: Vec<String> = Vec::new();
-        if let Some(u) = url {
-            fields.push(format!(r#""url": "{}""#, u));
-        }
+        let image_url = url
+            .map(|u| format!(r#"{{"url": "{}"}}"#, u))
+            .unwrap_or_else(|| "null".to_string());
+        let uuid_field = uuid
+            .map(|id| format!(r#", "uuid": "{}""#, id))
+            .unwrap_or_default();
         if let Some(id) = uuid {
-            fields.push(format!(r#""uuid": "{}""#, id));
+            assert!(
+                !id.is_empty(),
+                "test helper expects empty uuid cases to use explicit JSON"
+            );
         }
         content_parts.push(format!(
-            r#"{{"type": "image_url", "image_url": {{{}}}}}"#,
-            fields.join(", ")
+            r#"{{"type": "image_url", "image_url": {}{}}}"#,
+            image_url, uuid_field
         ));
     }
     format!(
@@ -728,15 +733,15 @@ async fn test_media_url_passthrough(#[case] media_chunks: &[(&str, usize)]) {
 )]
 // 1 image, url + uuid — single uuid forwarded
 #[case::one_url_and_uuid(
-    &[(Some("https://example.com/img1.jpg"), Some("00000000-0000-0000-0000-000000000001"))],
-    &[Some("00000000-0000-0000-0000-000000000001")],
-    Some(vec![Some("00000000-0000-0000-0000-000000000001")])
+    &[(Some("https://example.com/img1.jpg"), Some("img-1"))],
+    &[Some("img-1")],
+    Some(vec![Some("img-1")])
 )]
 // 1 image, uuid-only — no decode, uuid still forwarded
 #[case::one_uuid_only(
-    &[(None, Some("00000000-0000-0000-0000-0000000000ff"))],
-    &[Some("00000000-0000-0000-0000-0000000000ff")],
-    Some(vec![Some("00000000-0000-0000-0000-0000000000ff")])
+    &[(None, Some("img-cache-hit"))],
+    &[Some("img-cache-hit")],
+    Some(vec![Some("img-cache-hit")])
 )]
 // 5 images per request, 4 of them are uuid-only repeats of the first (the
 // "uuid-and-strip" cached-MM scenario from aiperf #869). Each repeat carries
@@ -744,25 +749,25 @@ async fn test_media_url_passthrough(#[case] media_chunks: &[(&str, usize)]) {
 // uuid 5 times. The leading image is url+uuid; the rest are uuid-only.
 #[case::five_with_four_overlapping_uuid_only(
     &[
-        (Some("https://example.com/img1.jpg"), Some("00000000-0000-0000-0000-0000000000aa")),
-        (None, Some("00000000-0000-0000-0000-0000000000aa")),
-        (None, Some("00000000-0000-0000-0000-0000000000aa")),
-        (None, Some("00000000-0000-0000-0000-0000000000aa")),
-        (None, Some("00000000-0000-0000-0000-0000000000aa")),
+        (Some("https://example.com/img1.jpg"), Some("img-aa")),
+        (None, Some("img-aa")),
+        (None, Some("img-aa")),
+        (None, Some("img-aa")),
+        (None, Some("img-aa")),
     ],
     &[
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
     ],
     Some(vec![
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
-        Some("00000000-0000-0000-0000-0000000000aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
+        Some("img-aa"),
     ])
 )]
 // 5 images per request: 1 fresh url+uuid + 4 distinct uuid-only repeats from a
@@ -771,25 +776,25 @@ async fn test_media_url_passthrough(#[case] media_chunks: &[(&str, usize)]) {
 // passthrough — the actual cache hit/miss is the backend's job).
 #[case::five_one_fresh_four_uuid_only_distinct(
     &[
-        (Some("https://example.com/new.jpg"), Some("00000000-0000-0000-0000-000000000005")),
-        (None, Some("00000000-0000-0000-0000-000000000001")),
-        (None, Some("00000000-0000-0000-0000-000000000002")),
-        (None, Some("00000000-0000-0000-0000-000000000003")),
-        (None, Some("00000000-0000-0000-0000-000000000004")),
+        (Some("https://example.com/new.jpg"), Some("img-5")),
+        (None, Some("img-1")),
+        (None, Some("img-2")),
+        (None, Some("img-3")),
+        (None, Some("img-4")),
     ],
     &[
-        Some("00000000-0000-0000-0000-000000000005"),
-        Some("00000000-0000-0000-0000-000000000001"),
-        Some("00000000-0000-0000-0000-000000000002"),
-        Some("00000000-0000-0000-0000-000000000003"),
-        Some("00000000-0000-0000-0000-000000000004"),
+        Some("img-5"),
+        Some("img-1"),
+        Some("img-2"),
+        Some("img-3"),
+        Some("img-4"),
     ],
     Some(vec![
-        Some("00000000-0000-0000-0000-000000000005"),
-        Some("00000000-0000-0000-0000-000000000001"),
-        Some("00000000-0000-0000-0000-000000000002"),
-        Some("00000000-0000-0000-0000-000000000003"),
-        Some("00000000-0000-0000-0000-000000000004"),
+        Some("img-5"),
+        Some("img-1"),
+        Some("img-2"),
+        Some("img-3"),
+        Some("img-4"),
     ])
 )]
 #[tokio::test]

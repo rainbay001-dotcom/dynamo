@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # End-to-end test for the cached-MM uuid passthrough on dynamo.frontend +
-# dynamo.vllm. The `uuid` field on `image_url` is a vLLM extension to the
-# OpenAI-compat chat schema (see vLLM's `multi_modal_uuids`). Boots a small
+# dynamo.vllm. The top-level `uuid` field on media content parts is a vLLM
+# extension to the OpenAI-compat chat schema (see vLLM's `multi_modal_uuids`). Boots a small
 # Qwen3-VL-2B-Instruct worker (with `mm_processor_cache_gb > 0`) plus a
 # frontend, sends four request shapes:
 #
-#   1. {url, uuid: A}                     → success (cache fill)
-#   2. {uuid: A}                          → success (cache hit, same uuid)
-#   3. {uuid: B}  (B unseen)              → error (cache miss)
-#   4. 5 images: [{url+uuid:A}, *4 {uuid:A}]
+#   1. {image_url: {url}, uuid: A}        → success (cache fill)
+#   2. {image_url: null, uuid: A}         → success (cache hit, same uuid)
+#   3. {image_url: null, uuid: B}         → error (cache miss)
+#   4. 5 images: [{url}+uuid:A, *4 null+uuid:A]
 #                                         → success (1 cold + 4 hits)
 #
 # Prereqs (run inside the worktree's container — see /run-local-dynamo):
@@ -45,8 +45,8 @@ buf = BytesIO()
 img.save(buf, format="PNG")
 print(base64.b64encode(buf.getvalue()).decode(), end="")
 ')"
-IMG_A_UUID="aabbccdd-eeff-0011-2233-445566778899"
-IMG_B_UUID="ffffffff-ffff-ffff-ffff-ffffffffffff"
+IMG_A_UUID="image-a"
+IMG_B_UUID="image-b"
 
 cleanup() {
     pkill -f "dynamo.frontend" 2>/dev/null || true
@@ -122,7 +122,7 @@ REQ1=$(jq -n --arg model "$MODEL" --arg url "$IMG_A_URL" --arg uuid "$IMG_A_UUID
         role: "user",
         content: [
             {type: "text", text: "What color dominates this image?"},
-            {type: "image_url", image_url: {url: $url, uuid: $uuid}}
+            {type: "image_url", image_url: {url: $url}, uuid: $uuid}
         ]
     }]
 }')
@@ -136,7 +136,7 @@ REQ2=$(jq -n --arg model "$MODEL" --arg uuid "$IMG_A_UUID" '{
         role: "user",
         content: [
             {type: "text", text: "Describe what you remember."},
-            {type: "image_url", image_url: {uuid: $uuid}}
+            {type: "image_url", image_url: null, uuid: $uuid}
         ]
     }]
 }')
@@ -150,7 +150,7 @@ REQ3=$(jq -n --arg model "$MODEL" --arg uuid "$IMG_B_UUID" '{
         role: "user",
         content: [
             {type: "text", text: "Should fail (cache miss)."},
-            {type: "image_url", image_url: {uuid: $uuid}}
+            {type: "image_url", image_url: null, uuid: $uuid}
         ]
     }]
 }')
@@ -164,31 +164,15 @@ REQ4=$(jq -n --arg model "$MODEL" --arg url "$IMG_A_URL" --arg uuid "$IMG_A_UUID
         role: "user",
         content: [
             {type: "text", text: "Compare these 5 images."},
-            {type: "image_url", image_url: {url: $url, uuid: $uuid}},
-            {type: "image_url", image_url: {uuid: $uuid}},
-            {type: "image_url", image_url: {uuid: $uuid}},
-            {type: "image_url", image_url: {uuid: $uuid}},
-            {type: "image_url", image_url: {uuid: $uuid}}
+            {type: "image_url", image_url: {url: $url}, uuid: $uuid},
+            {type: "image_url", image_url: null, uuid: $uuid},
+            {type: "image_url", image_url: null, uuid: $uuid},
+            {type: "image_url", image_url: null, uuid: $uuid},
+            {type: "image_url", image_url: null, uuid: $uuid}
         ]
     }]
 }')
 post_req "$REQ4" "04_five_imgs_one_fresh_four_repeats"
-
-# Req 5 — wire-boundary negative case: a non-UUID `uuid` string
-# (e.g. aiperf's old `img-<hex>` shape) MUST be rejected at the chat
-# parser with HTTP 400. This proves the strict-public contract.
-REQ5=$(jq -n --arg model "$MODEL" '{
-    model: $model,
-    max_tokens: 4,
-    messages: [{
-        role: "user",
-        content: [
-            {type: "text", text: "Should be rejected at the wire."},
-            {type: "image_url", image_url: {uuid: "img-not-a-uuid"}}
-        ]
-    }]
-}')
-post_req "$REQ5" "05_negative_non_uuid_string" || true
 
 echo
 echo "=== ASSERTIONS ==="
@@ -221,15 +205,6 @@ for label in 01_url_plus_uuid_fill 02_uuid_only_hit 03_uuid_only_miss 04_five_im
         FAIL=$((FAIL + 1))
     fi
 done
-
-# Negative case is inverted: PASS only when the parser rejects it.
-if not_a_parse_error "$LOG_DIR/05_negative_non_uuid_string.json"; then
-    echo "  FAIL  05_negative_non_uuid_string  (non-UUID uuid was NOT rejected)"
-    FAIL=$((FAIL + 1))
-else
-    echo "  PASS  05_negative_non_uuid_string  (non-UUID rejected at wire boundary)"
-    PASS=$((PASS + 1))
-fi
 
 echo
 echo "PASS=$PASS FAIL=$FAIL  (logs in $LOG_DIR)"

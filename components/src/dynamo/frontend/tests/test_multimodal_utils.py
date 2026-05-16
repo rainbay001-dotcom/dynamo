@@ -181,10 +181,8 @@ def test_url_with_uuid_emits_uuid_in_parallel_map():
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": "https://example.com/cat.png",
-                        "uuid": "img-aabbccdd",
-                    },
+                    "image_url": {"url": "https://example.com/cat.png"},
+                    "uuid": "img-aabbccdd",
                 },
             ],
         }
@@ -202,7 +200,8 @@ def test_uuid_only_emits_uuid_only_variant():
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"uuid": "img-aabbccdd"},
+                    "image_url": None,
+                    "uuid": "img-aabbccdd",
                 },
             ],
         }
@@ -225,15 +224,13 @@ def test_five_images_one_fresh_four_uuid_only_repeats():
                 {"type": "text", "text": "Compare these"},
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": "https://example.com/new.png",
-                        "uuid": "img-new",
-                    },
+                    "image_url": {"url": "https://example.com/new.png"},
+                    "uuid": "img-new",
                 },
-                {"type": "image_url", "image_url": {"uuid": "img-rep1"}},
-                {"type": "image_url", "image_url": {"uuid": "img-rep2"}},
-                {"type": "image_url", "image_url": {"uuid": "img-rep3"}},
-                {"type": "image_url", "image_url": {"uuid": "img-rep4"}},
+                {"type": "image_url", "image_url": None, "uuid": "img-rep1"},
+                {"type": "image_url", "image_url": None, "uuid": "img-rep2"},
+                {"type": "image_url", "image_url": None, "uuid": "img-rep3"},
+                {"type": "image_url", "image_url": None, "uuid": "img-rep4"},
             ],
         }
     ]
@@ -264,15 +261,13 @@ def test_five_images_one_fresh_four_overlapping_same_uuid():
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": "https://example.com/img1.png",
-                        "uuid": "img-aa",
-                    },
+                    "image_url": {"url": "https://example.com/img1.png"},
+                    "uuid": "img-aa",
                 },
-                {"type": "image_url", "image_url": {"uuid": "img-aa"}},
-                {"type": "image_url", "image_url": {"uuid": "img-aa"}},
-                {"type": "image_url", "image_url": {"uuid": "img-aa"}},
-                {"type": "image_url", "image_url": {"uuid": "img-aa"}},
+                {"type": "image_url", "image_url": None, "uuid": "img-aa"},
+                {"type": "image_url", "image_url": None, "uuid": "img-aa"},
+                {"type": "image_url", "image_url": None, "uuid": "img-aa"},
+                {"type": "image_url", "image_url": None, "uuid": "img-aa"},
             ],
         }
     ]
@@ -297,7 +292,8 @@ def test_uuid_dropped_when_empty_string():
             "content": [
                 {
                     "type": "image_url",
-                    "image_url": {"url": "https://example.com/x.png", "uuid": ""},
+                    "image_url": {"url": "https://example.com/x.png"},
+                    "uuid": "",
                 },
             ],
         }
@@ -313,7 +309,7 @@ def test_uuid_only_with_empty_uuid_skipped():
         {
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"uuid": ""}},
+                {"type": "image_url", "image_url": None, "uuid": ""},
             ],
         }
     ]

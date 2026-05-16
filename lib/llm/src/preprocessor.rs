@@ -674,25 +674,21 @@ impl OpenAIPreprocessor {
                 _ => continue,
             };
             for content_part in content_parts.iter() {
-                // The chat structs hold a strict `Uuid` at the wire boundary.
-                // Downgrade to `String` here — vLLM's `multi_modal_uuids` is
-                // format-free and the rest of our internal pipeline already
-                // takes strings.
                 let (type_str, url, uuid) = match content_part {
                     ChatCompletionRequestUserMessageContentPart::ImageUrl(p) => (
                         "image_url",
-                        p.image_url.url.clone(),
-                        p.image_url.uuid.map(|u| u.to_string()),
+                        p.image_url.as_ref().and_then(|i| i.url.clone()),
+                        p.uuid.clone(),
                     ),
                     ChatCompletionRequestUserMessageContentPart::VideoUrl(p) => (
                         "video_url",
-                        p.video_url.url.clone(),
-                        p.video_url.uuid.map(|u| u.to_string()),
+                        p.video_url.as_ref().and_then(|v| v.url.clone()),
+                        p.uuid.clone(),
                     ),
                     ChatCompletionRequestUserMessageContentPart::AudioUrl(p) => (
                         "audio_url",
-                        p.audio_url.url.clone(),
-                        p.audio_url.uuid.map(|u| u.to_string()),
+                        p.audio_url.as_ref().and_then(|a| a.url.clone()),
+                        p.uuid.clone(),
                     ),
                     _ => continue,
                 };
@@ -771,9 +767,13 @@ impl OpenAIPreprocessor {
                         let w = shape[1] as u32;
                         let url_str = match _content_part {
                             ChatCompletionRequestUserMessageContentPart::ImageUrl(p) => {
-                                p.image_url.url.as_ref().map(|u| u.as_str()).expect(
-                                    "rdma image_url descriptor only originates from url-bearing ImageUrl content parts",
-                                )
+                                p.image_url
+                                    .as_ref()
+                                    .and_then(|i| i.url.as_ref())
+                                    .map(|u| u.as_str())
+                                    .expect(
+                                        "rdma image_url descriptor only originates from url-bearing ImageUrl content parts",
+                                    )
                             }
                             _ => unreachable!(
                                 "rdma image_url descriptor only originates from ImageUrl content parts"

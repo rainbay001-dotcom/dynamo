@@ -189,7 +189,6 @@ impl From<&str> for ImageUrl {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
             detail: Default::default(),
-            uuid: None,
         }
     }
 }
@@ -199,7 +198,6 @@ impl From<String> for ImageUrl {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
             detail: Default::default(),
-            uuid: None,
         }
     }
 }
@@ -209,7 +207,6 @@ impl From<&str> for VideoUrl {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
             detail: Default::default(),
-            uuid: None,
         }
     }
 }
@@ -219,7 +216,6 @@ impl From<String> for VideoUrl {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
             detail: Default::default(),
-            uuid: None,
         }
     }
 }
@@ -228,7 +224,6 @@ impl From<&str> for AudioUrl {
     fn from(value: &str) -> Self {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
-            uuid: None,
         }
     }
 }
@@ -237,7 +232,6 @@ impl From<String> for AudioUrl {
     fn from(value: String) -> Self {
         Self {
             url: Some(value.parse::<Url>().expect("Invalid URL")),
-            uuid: None,
         }
     }
 }

@@ -56,16 +56,18 @@ def extract_mm_urls(
 ) -> tuple[dict[str, list[dict[str, Any]]] | None, dict[str, list[str | None]] | None,]:
     """Extract multimodal URLs (and per-part `uuid`s) from chat messages.
 
-    `uuid` is a vLLM extension to the OpenAI-compat chat schema (an opaque
-    cache key for vLLM's `multi_modal_uuids` / `mm_processor_cache`).
+    `uuid` is a top-level vLLM extension to the OpenAI-compat chat content
+    part schema (an opaque cache key for vLLM's `multi_modal_uuids` /
+    `mm_processor_cache`).
 
     Walks user-message content arrays and collects ``image_url``, ``audio_url``,
     and ``video_url`` entries. Each part is one of:
 
-    - ``{url}`` (no uuid)    → ``{"Url": url}`` slot
-    - ``{url, uuid}``        → ``{"Url": url}`` slot, uuid stored parallel
-    - ``{uuid}`` (no url)    → ``{"UuidOnly": uuid}`` slot — backend resolves
-                               via vLLM's mm_processor_cache.
+    - ``{image_url: {url}}`` (no uuid) → ``{"Url": url}`` slot
+    - ``{image_url: {url}, uuid}``     → ``{"Url": url}`` slot, uuid stored
+                                         parallel
+    - ``{image_url: None, uuid}``      → ``{"UuidOnly": uuid}`` slot — backend
+                                         resolves via vLLM's mm_processor_cache.
 
     Returns ``(mm_data, mm_uuids)``:
 
@@ -93,15 +95,13 @@ def extract_mm_urls(
             if part_type not in _MEDIA_CONTENT_TYPES:
                 continue
             media_value = part.get(part_type)
-            if not isinstance(media_value, dict):
-                continue
-            url = media_value.get("url")
-            uuid = media_value.get("uuid")
+            uuid = part.get("uuid")
+            url = media_value.get("url") if isinstance(media_value, dict) else None
             url_present = isinstance(url, str) and bool(url)
             uuid_present = isinstance(uuid, str) and bool(uuid)
 
             if not url_present and not uuid_present:
-                # Defensive skip; Rust preprocessor rejects empty parts upstream.
+                # Defensive skip; Rust preprocessor rejects empty/null parts upstream.
                 continue
 
             if url_present:
