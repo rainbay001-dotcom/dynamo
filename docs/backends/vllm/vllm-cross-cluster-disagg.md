@@ -328,6 +328,30 @@ This is only relevant when using KVBM disagg (PR #9393). Standard vLLM disagg (`
 ### Decode worker fails with `LlamaForCausalLM failed to be inspected`
 Two workers loading the model from NFS simultaneously can race on config file locks. Add a 10-second stagger between decode worker starts.
 
+## Experiment C: KVBM Conditional Disagg on Blackwell B100
+
+**Setup**: KVBM v2 conditional disagg (`DynamoConnector`) on 2x B100 Blackwell, same node, Qwen3-8B NVFP4, UCX host cache.
+
+**Key findings from setup:**
+- B100 runs NVFP4 natively via `NvFp4LinearBackend.FLASHINFER_CUTLASS` (Blackwell-native FP4 compute)
+- `nixl-cu13==1.1.0` must be used (not `nixl-cu12==0.10.1`) — they have separate libnixl instances; kvbm must be compiled against cu13 to use its plugin registry at runtime
+- UCX is required for `cache.host` (CPU memory cache); UCX libraries at `/usr/local/ucx/lib/` on b100_preprod nodes
+- `cache.host` requires UCX; `cache.device` is not a valid config key; `cache.disk` uses POSIX
+- Both nixl_cu13 libraries AND UCX must be in `LD_LIBRARY_PATH` when launching workers
+- `NIXL_PLUGIN_DIR` must point to nixl_cu13 plugins (not system NIXL)
+
+**Measured**: single-request TTFT ~120ms for Qwen3-8B (9 prompt tokens, 20 output tokens).
+
+**Launch env (Docker, b100_preprod):**
+```bash
+NW13=/opt/dynamo/venv/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs
+export LD_LIBRARY_PATH="/usr/local/ucx/lib:$NW13:$NW13/plugins:/opt/nvidia/nvda_nixl/lib64"
+export NIXL_PLUGIN_DIR="$NW13/plugins"
+export NIXL_PREFIX=/tmp/nixl-cu13  # symlink: lib64/libnixl.so → $NW13/libnixl.so
+```
+
+See `dynamo-pfaas/.claude/skills/disagg-bringup/launch-kvbm-docker.sh` for the full reproducible setup including all hard-won env var requirements.
+
 ## See Also
 
 - [Disaggregated Serving design doc](../../../docs/design-docs/disagg-serving.md)
