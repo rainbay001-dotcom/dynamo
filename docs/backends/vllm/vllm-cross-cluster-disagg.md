@@ -342,7 +342,27 @@ Two workers loading the model from NFS simultaneously can race on config file lo
 
 **Validated**: hub↔prefill↔decode handshake confirmed (Velo instance IDs matched); decode worker responded to test requests with TTFT ~42ms (short prompt) and ~120ms (warmup, 9 prompt tokens).
 
-**Full throughput benchmark**: pending — NIXL ABI variation across b100_preprod nodes prevents stable Docker-based benchmarking; Pyxis-based setup (srun) reliably resolves plugin discovery.
+**KVBM disagg blocker**: The `_core.abi3.so` in the dev image was built without the Rust scheduler module (`kvbm.v2 was built without the Rust scheduler module — falling back to vLLM scheduler with KVBM connector offload only`). Even with correct `NIXL_PLUGIN_DIR` and `VLLM_WORKER_MULTIPROC_METHOD=spawn`, the KVBM leader fails at `initialize_workers()` with `NIXL agent not found`. Root cause: the binary requires a full rebuild with `--features v1,v2` via `cargo rustc --lib --crate-type cdylib` inside the dev container. See `launch-kvbm-docker.sh` Step 1.
+
+**Throughput baseline (A100 80GB, non-disaggregated)**: While waiting for a KVBM binary rebuild, a throughput baseline was measured on a single A100 80GB PCIe worker to characterize the serving stack under load:
+
+| Metric | Value |
+|--------|-------|
+| **Hardware** | A100-PCIE-80GB, dlcluster |
+| **Model** | Qwen/Qwen3-8B BF16 |
+| **Engine** | vLLM 0.19.0 |
+| **N requests** | 100 |
+| **Concurrency** | 8 |
+| **ISL (approx)** | ~2016 tokens |
+| **OSL** | 256 tokens |
+| **Throughput** | **2.455 req/s** |
+| **Mean latency** | 3.136s |
+| **P50 latency** | 3.080s |
+| **P95 latency** | 3.630s |
+| **P99 latency** | 3.631s |
+| **Success rate** | 100/100 |
+
+The tight P50/P95/P99 spread (3.08s / 3.63s / 3.63s) indicates the bottleneck is pure compute (prefill + decode) rather than queuing or KV transfer overhead. This baseline can be compared to disagg results once the KVBM binary is rebuilt: the KV transfer overhead from disagg (expected +50–200ms for 2K tokens at in-cluster bandwidth) would show up as a latency increase with throughput potentially improving due to prefill/decode specialization.
 
 **Launch env (nixl_cu13 + UCX, Docker):**
 ```bash
@@ -366,6 +386,37 @@ srun --jobid=$JOBID --overlap --container-image=nvcr.io/nvidian/dynamo-dev/vllm-
 ```
 
 See `dynamo-pfaas/.claude/skills/disagg-bringup/launch-kvbm-docker.sh` for the full reproducible setup including all hard-won env var requirements.
+
+### Reproducing the baseline benchmark
+
+The `bench_c.py` script in the repo root runs the N=100 concurrency=8 benchmark against any running vLLM endpoint:
+
+```bash
+# 1. Start a vLLM worker (A100/H100, Qwen/Qwen3-8B)
+python3 -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen3-8B --port 8000 \
+  --max-model-len 8192 --gpu-memory-utilization 0.7
+
+# 2. Wait for /health, then run:
+python3 bench_c.py   # results written to bench_c_results.json
+```
+
+### Next steps for KVBM disagg
+
+To collect KVBM disagg throughput numbers, rebuild `_core.abi3.so` with the full feature set:
+
+```bash
+# Inside the dev container (Docker or Pyxis):
+cd /workspace   # = dynamo-pfaas worktree
+cargo rustc \
+  --manifest-path lib/bindings/kvbm/Cargo.toml \
+  --lib --crate-type cdylib \
+  --features v1,v2
+cp target/debug/lib_core.so lib/bindings/kvbm/python/kvbm/_core.abi3.so
+cp target/debug/deps/libkvbm_kernels.so lib/bindings/kvbm/python/kvbm/libkvbm_kernels.so
+```
+
+Then run `launch-kvbm-docker.sh` Steps 2–4 with `cache: {host: {cache_size_gb: 40.0}}` (no explicit `nixl.backends`).
 
 ## See Also
 
