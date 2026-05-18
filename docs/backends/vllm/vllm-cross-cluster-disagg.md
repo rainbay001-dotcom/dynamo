@@ -85,7 +85,7 @@ This guide covers four experiments, each targeting a different question:
 | A | Does PrfaaS work with mismatched GPU types? | **Done** — TTFT sweep, A10→H100 NVL |
 | B | How much does network distance cost? | **Done** — TTFT vs RTT, same-fabric vs 41.5ms WAN |
 | C | What is the throughput and tail-latency overhead of disaggregation? | **Done** — N=100 c=8 bench, NixlConnector, 2×A100 same-node |
-| D | Can conditional disagg (KVBM) run on Blackwell B100? | **Blocked** — `_core.abi3.so` binary needs rebuild |
+| D | Can conditional disagg (KVBM) run on Blackwell B100? | **Blocked** — v2 scheduler deferred in `v2/mod.rs` (see Exp D section) |
 
 ### Experiment A: Hardware specialization (heterogeneous)
 
@@ -370,46 +370,58 @@ python3 bench_c_disagg.py     # results written to bench_disagg_results.json
 python3 bench_c.py            # results written to bench_c_results.json
 ```
 
-## Experiment D (planned): KVBM Conditional Disagg on Blackwell B100
+## Experiment D (blocked): KVBM Conditional Disagg on Blackwell B100
 
 **Goal**: KVBM v2 conditional disagg (`DynamoConnector`) on 2x B100 Blackwell, same node, Qwen3-8B BF16, host CPU KV cache (POSIX shared memory).
 
-**Status: blocked on binary build.** The `_core.abi3.so` in the dev image was built without the Rust scheduler module (`kvbm.v2 was built without the Rust scheduler module — falling back to vLLM scheduler with KVBM connector offload only`). Even with correct `NIXL_PLUGIN_DIR`, the KVBM leader fails at `initialize_workers()` with `NIXL agent not found`. Root cause: binary requires full rebuild with `--features v1,v2` via `cargo rustc --lib --crate-type cdylib` inside the dev container.
+**Status: blocked — deferred feature in `ryan/kvbm-rdma-pull`.** The full bringup (binary, NIXL env, container-name IPC, hub, workers) was completed and validated. The blocker is a code-level deferral in the branch itself, not infrastructure.
 
-**Key findings from B100 bringup:**
-- B100 runs NVFP4 natively via `NvFp4LinearBackend.FLASHINFER_CUTLASS` (Blackwell-native FP4 compute)
-- `_core.abi3.so` links at runtime to whichever `libnixl.so` appears first in `LD_LIBRARY_PATH`; system NIXL at `/opt/nvidia/nvda_nixl/lib64/` is version 1.3.x, nixl_cu13 is 1.1.0 — **ABI-incompatible**; use nixl_cu13 consistently
-- `nixl-cu13==1.1.0` required (not `nixl-cu12==0.10.1`) — separate libnixl instances
-- `NIXL_PLUGIN_DIR` must point to nixl_cu13 plugins, not system NIXL
-- `cache.host.cache_size_gb` ≥ 40 GB to avoid `Failed to allocate N destination blocks` under c=8 load
-- KVBM disagg in Docker on b100_preprod nodes fails with `NIXL agent not found` — **use Pyxis** (`srun --container-image=...`) for reliable plugin injection
+### What was validated
 
-**Validated**: hub↔prefill↔decode handshake confirmed (Velo instance IDs matched); TTFT ~42ms (short prompt) and ~120ms (warmup, 9 prompt tokens) before the throughput blocker was hit.
+All pre-requisites were confirmed working on 2x B100 node `4u4g-gen-0103` (job 1035299):
 
-**To unblock Experiment D**, rebuild `_core.abi3.so` inside the dev container:
+- `_core.abi3.so` rebuilt with `cargo rustc --lib --crate-type cdylib --features v1,v2` inside Pyxis container (May 18 22:16) ✓
+- Hub starts successfully on ports 1337/8337/1338 with CD prefill dispatcher ✓
+- Config reaches EngineCore subprocess correctly: `kvbm_override_config keys: ['leader', 'worker']` ✓
+- NIXL UCX auto-enabled: `Auto-enabling NIXL backend UCX (host cache requires it)` ✓
+- NIXL_PLUGIN_DIR correctly overrides container ENV to wheel path: `.nixl_cu13.mesonpy.libs/plugins` ✓
+- Workers run in shared IPC container via `--container-name=kvbm-exp-d` ✓
 
-```bash
-# Inside the dev container (Docker or Pyxis):
-cd /workspace   # = dynamo-pfaas worktree
-cargo rustc \
-  --manifest-path lib/bindings/kvbm/Cargo.toml \
-  --lib --crate-type cdylib \
-  --features v1,v2
-cp target/debug/lib_core.so lib/bindings/kvbm/python/kvbm/_core.abi3.so
-cp target/debug/deps/libkvbm_kernels.so lib/bindings/kvbm/python/kvbm/libkvbm_kernels.so
+### The actual blocker
+
+`lib/bindings/kvbm/src/v2/mod.rs` line 5:
+
+```rust
+// pub mod scheduler;
+//
+// DEFERRED — the on-disk scheduler/{mod,config,status}.rs files reference
+// types from the pre-decomposition dynamo_kvbm crate. Re-enabling requires
+// porting into kvbm-engine + kvbm-logical.
+//
+// Phase 5 of the ACTIVE_PLAN does not need the Rust scheduler; restoring it
+// is shadow-mode divergence work and can wait for an explicit driver.
 ```
 
-**Launch env (nixl_cu13 + UCX, Docker):**
-```bash
-NW13=/opt/dynamo/venv/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs
-mkdir -p /tmp/nixl-cu13/lib64
-ln -sf "$NW13/libnixl.so" /tmp/nixl-cu13/lib64/libnixl.so
-export LD_LIBRARY_PATH="/usr/local/ucx/lib:$NW13:$NW13/plugins:/opt/nvidia/nvda_nixl/lib64"
-export NIXL_PREFIX=/tmp/nixl-cu13      # symlink: lib64/libnixl.so → nixl_cu13
-export NIXL_PLUGIN_DIR="$NW13/plugins" # nixl_cu13 UCX+POSIX plugins
+The v2 Rust scheduler module manages the NIXL agent lifecycle. Without it, `KvbmRuntimeBuilder::build_leader()` creates a runtime with `nixl_agent: None`. When `SchedulerConnectorLeader.initialize_workers()` later calls `runtime.nixl_agent()`, it returns `None` and fails with:
+
+```
+kvbm_connector::connector::worker::state: Worker complete_initialization failed
+    error=NIXL agent not found
 ```
 
-See `dynamo-pfaas/.claude/skills/disagg-bringup/launch-kvbm-docker.sh` for the full reproducible setup.
+**The warning `kvbm.v2 was built without the Rust scheduler module` is expected and intentional** — it's the Python fallback for this deferred code path. The binary (`--features v1,v2`) is correct; the limitation is in the runtime code, not the build.
+
+### To unblock Experiment D
+
+Port the deferred scheduler module into the decomposed crates (`kvbm-engine` + `kvbm-logical`) per the ACTIVE_PLAN Phase 5 notes in `v2/mod.rs`. The infrastructure (launch scripts, NIXL config, IPC pattern) is all ready — the blocker is purely the Rust scheduler porting work.
+
+### Hard-won bringup notes (for when the scheduler is ported)
+
+- `cache.device` is NOT a valid KVBM tier — only `host` (G2/CPU) and `disk` (G3)
+- `srun -e KEY=VAL` means `--error` (stderr redirect), NOT env var — use `export` inside `bash -c "..."`
+- Container image has `NIXL_PLUGIN_DIR=/opt/nvidia/nvda_nixl/lib64/plugins` baked in (system NIXL, no UCX) — must override with `export NIXL_PLUGIN_DIR=.../nixl_cu13.mesonpy.libs/plugins` inside bash -c
+- All KVBM components (hub, prefill, decode) must share the same Pyxis container via `--container-name` so NIXL agents can find each other via POSIX shared memory
+- See `dynamo-pfaas/.claude/skills/disagg-bringup/launch-kvbm-docker.sh` (comments 7–10) for full details
 
 ## See Also
 
