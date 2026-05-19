@@ -374,54 +374,57 @@ python3 bench_c.py            # results written to bench_c_results.json
 
 **Goal**: KVBM v2 conditional disagg (`DynamoConnector`) on 2x B100 Blackwell, same node, Qwen3-8B BF16, host CPU KV cache (POSIX shared memory).
 
-**Status: blocked — deferred feature in `ryan/kvbm-rdma-pull`.** The full bringup (binary, NIXL env, container-name IPC, hub, workers) was completed and validated. The blocker is a code-level deferral in the branch itself, not infrastructure.
+**Status: disaggregated path blocked for long ISL.** Full bringup validated; workers start and serve requests. Short prompts work; ISL≥~2016 tokens (which triggers disaggregation) hangs due to a deferred scheduler in the branch.
 
-### What was validated
+### What was validated (2x H100, dlcluster 4u4g-0073)
 
-All pre-requisites were confirmed working on 2x B100 node `4u4g-gen-0103` (job 1035299):
+- `_core.abi3.so` rebuilt with `cargo rustc --lib --crate-type cdylib --features v1,v2` ✓
+- `DYN_KVBM_CPU_CACHE_GB=40` env var required — JSON `cache.host` alone not sufficient (Figment profile parsing issue) ✓
+- Hub starts on ports 1337/8337/1338 with CD prefill dispatcher ✓
+- `NIXL_PLUGIN_DIR` must be exported inside `bash -c` to override the container's baked-in ENV (`/opt/nvidia/nvda_nixl/lib64/plugins` has no UCX) ✓
+- Workers run in shared IPC container via `--container-name=kvbm-exp-d` — required for NIXL agent discovery ✓
+- KVBM v2 workers initialize: `NIXL registered layouts=[G1, G2]`, `All workers initialized successfully` ✓
+- **Short prompts (≤~9 tokens) complete successfully** — handled locally without disaggregation ✓
 
-- `_core.abi3.so` rebuilt with `cargo rustc --lib --crate-type cdylib --features v1,v2` inside Pyxis container (May 18 22:16) ✓
-- Hub starts successfully on ports 1337/8337/1338 with CD prefill dispatcher ✓
-- Config reaches EngineCore subprocess correctly: `kvbm_override_config keys: ['leader', 'worker']` ✓
-- NIXL UCX auto-enabled: `Auto-enabling NIXL backend UCX (host cache requires it)` ✓
-- NIXL_PLUGIN_DIR correctly overrides container ENV to wheel path: `.nixl_cu13.mesonpy.libs/plugins` ✓
-- Workers run in shared IPC container via `--container-name=kvbm-exp-d` ✓
+### The conditional disagg threshold
 
-### The actual blocker
+KVBM "conditional" disagg decides per-request whether to route to a separate prefill worker. Short prompts are processed locally (hub not involved). Long prompts are dispatched via the hub's CD dispatcher to the prefill worker. Verified by inspection: a 9-token "hi" request does NOT appear in hub logs; ISL~2016 tokens DOES trigger hub dispatch.
 
-`lib/bindings/kvbm/src/v2/mod.rs` line 5:
+### The runtime blocker for long ISL
+
+When ISL crosses the disagg threshold:
+
+1. Decode worker sends request to hub
+2. Hub dispatches `PrefillRequest` to prefill (:8001) — **confirmed working** in hub log
+3. Prefill processes prompt and finishes — **confirmed working** in prefill log
+4. Prefill waits for decode to send "onboard kick" to begin KV transfer — **stuck here**
+5. Decode never sends the kick because the v2 Rust scheduler (which manages this handshake) is deferred
+6. Hub retries the same request every 10 seconds indefinitely
+
+Root code: `lib/bindings/kvbm/src/v2/mod.rs`:
 
 ```rust
 // pub mod scheduler;
 //
-// DEFERRED — the on-disk scheduler/{mod,config,status}.rs files reference
-// types from the pre-decomposition dynamo_kvbm crate. Re-enabling requires
-// porting into kvbm-engine + kvbm-logical.
-//
-// Phase 5 of the ACTIVE_PLAN does not need the Rust scheduler; restoring it
-// is shadow-mode divergence work and can wait for an explicit driver.
+// DEFERRED — the scheduler/{mod,config,status}.rs files reference types from
+// the pre-decomposition dynamo_kvbm crate. Phase 5 of the ACTIVE_PLAN does not
+// need the Rust scheduler; restoring it is shadow-mode divergence work.
 ```
 
-The v2 Rust scheduler module manages the NIXL agent lifecycle. Without it, `KvbmRuntimeBuilder::build_leader()` creates a runtime with `nixl_agent: None`. When `SchedulerConnectorLeader.initialize_workers()` later calls `runtime.nixl_agent()`, it returns `None` and fails with:
-
-```
-kvbm_connector::connector::worker::state: Worker complete_initialization failed
-    error=NIXL agent not found
-```
-
-**The warning `kvbm.v2 was built without the Rust scheduler module` is expected and intentional** — it's the Python fallback for this deferred code path. The binary (`--features v1,v2`) is correct; the limitation is in the runtime code, not the build.
+The Python fallback (`DynamoScheduler` → vLLM scheduler) handles request intake but doesn't implement the decode-side "onboard kick" that tells prefill to transfer KV. Requests for long ISL hang indefinitely; the Python client eventually times out (300s).
 
 ### To unblock Experiment D
 
-Port the deferred scheduler module into the decomposed crates (`kvbm-engine` + `kvbm-logical`) per the ACTIVE_PLAN Phase 5 notes in `v2/mod.rs`. The infrastructure (launch scripts, NIXL config, IPC pattern) is all ready — the blocker is purely the Rust scheduler porting work.
+Implement the deferred scheduler module per ACTIVE_PLAN Phase 5. Specifically: the decode-side "send onboard kick" in the disagg coordinator that triggers KV transfer from prefill. All infrastructure is ready.
 
-### Hard-won bringup notes (for when the scheduler is ported)
+### Hard-won bringup notes (preserved for when scheduler is ported)
 
+- `DYN_KVBM_CPU_CACHE_GB=40` env var is required — JSON `cache.host.cache_size_gb` does not properly reach the Rust config via Figment profile selection
 - `cache.device` is NOT a valid KVBM tier — only `host` (G2/CPU) and `disk` (G3)
 - `srun -e KEY=VAL` means `--error` (stderr redirect), NOT env var — use `export` inside `bash -c "..."`
-- Container image has `NIXL_PLUGIN_DIR=/opt/nvidia/nvda_nixl/lib64/plugins` baked in (system NIXL, no UCX) — must override with `export NIXL_PLUGIN_DIR=.../nixl_cu13.mesonpy.libs/plugins` inside bash -c
-- All KVBM components (hub, prefill, decode) must share the same Pyxis container via `--container-name` so NIXL agents can find each other via POSIX shared memory
-- See `dynamo-pfaas/.claude/skills/disagg-bringup/launch-kvbm-docker.sh` (comments 7–10) for full details
+- Container image has `NIXL_PLUGIN_DIR=/opt/nvidia/nvda_nixl/lib64/plugins` baked in (system NIXL has no UCX) — override via `export NIXL_PLUGIN_DIR=.../nixl_cu13.mesonpy.libs/plugins` inside bash -c
+- All KVBM components must share `--container-name` so NIXL agents can find each other via POSIX shared memory
+- See `exp_d_kvbm_launch.sh` in this repo and `dynamo-pfaas/.claude/skills/disagg-bringup/` for the full launch setup
 
 ## See Also
 
