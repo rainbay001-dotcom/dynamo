@@ -98,6 +98,8 @@ srun --jobid=$JOBID --overlap --container-name=$CONTAINER_NAME \
     export NIXL_PREFIX=/tmp/nixl-cu13
     export NIXL_PLUGIN_DIR=$NW13/plugins
     export LD_LIBRARY_PATH=/usr/local/ucx/lib:$NW13:$NW13/plugins:\${LD_LIBRARY_PATH:-}
+    export DYN_KVBM_CPU_CACHE_GB=40
+    export RUST_LOG=warn,kvbm_config=debug,kvbm_engine=debug
     source $C_VENV/bin/activate
     echo NIXL_PLUGIN_DIR=\$NIXL_PLUGIN_DIR >> /scratch/prefill_d.log
     python3 -m vllm.entrypoints.openai.api_server \
@@ -123,6 +125,8 @@ srun --jobid=$JOBID --overlap --container-name=$CONTAINER_NAME \
     export NIXL_PREFIX=/tmp/nixl-cu13
     export NIXL_PLUGIN_DIR=$NW13/plugins
     export LD_LIBRARY_PATH=/usr/local/ucx/lib:$NW13:$NW13/plugins:\${LD_LIBRARY_PATH:-}
+    export DYN_KVBM_CPU_CACHE_GB=40
+    export RUST_LOG=warn,kvbm_config=debug,kvbm_engine=debug
     source $C_VENV/bin/activate
     echo NIXL_PLUGIN_DIR=\$NIXL_PLUGIN_DIR >> /scratch/decode_d.log
     python3 -m vllm.entrypoints.openai.api_server \
