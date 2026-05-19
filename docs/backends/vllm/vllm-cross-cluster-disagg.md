@@ -86,7 +86,7 @@ This guide covers four experiments, each targeting a different question:
 | B | How much does network distance cost? | **Done** — TTFT vs RTT, same-fabric vs 41.5ms WAN |
 | C | What is the throughput and tail-latency overhead of disaggregation? | **Done** — N=100 c=8 bench, NixlConnector, 2×A100 same-node |
 | D | Can conditional disagg (KVBM) run end-to-end? | **Done** — 4.408 req/s at ISL=12 tokens (2×H100); ISL≥24 hangs (deferred v2 scheduler) |
-| E | What is the throughput on a realistic lognormal request distribution, cross-cluster? | **Done** — lognormal(μ=7, σ=1.5) ISL, N=200 c=8, A10 prefill (computelab) + H100 decode (dlcluster) |
+| E | What is the throughput on a realistic lognormal request distribution? | **Done** — lognormal(μ=7, σ=1.5) ISL, N=200 c=8, 2×H100 same-node (dlcluster ipp2-0493) |
 
 ### Experiment A: Hardware specialization (heterogeneous)
 
@@ -130,70 +130,60 @@ Note: a cold NIXL connection (first request after worker startup) adds ~0.79s of
 
 This experiment requires two clusters with a genuine inter-datacenter link. Use the KV size table above to predict expected transfer times at your measured bandwidth (`iperf3 -c <prefill_ip> -t 10 -P 4`) and compare against measured TTFT delta.
 
-### Experiment E: Realistic throughput (lognormal ISL, cross-cluster heterogeneous)
+### Experiment E: Realistic throughput (lognormal ISL, same-node H100+H100)
 
-**Prefill cluster: A10 (24 GB VRAM, computelab ipp1-1133)**
-**Decode cluster: H100 PCIe (81 GB VRAM, dlcluster ipp2-0493)**
-**Inter-cluster RTT: ~4.8ms**
+**Hardware: 2×H100 PCIe (81 GB VRAM each), dlcluster ipp2-0493, same-node**
+**NIXL transport: POSIX shared memory (SHM) — no UCX TCP**
 **Image: `nvcr.io/nvidian/dynamo-dev/vllm-runtime:mkosec-2da789b71`**
 
 Experiments A/B measured TTFT at fixed ISLs with `max_tokens=1`, which isolates the prefill+transfer path but doesn't capture realistic serving load. This experiment runs a sustained throughput benchmark with a lognormal ISL distribution matching real-world request patterns.
 
+**Why same-node instead of cross-cluster**: A cross-cluster attempt (A10 computelab → H100 dlcluster) was blocked by a UCX TCP bug in Docker containers — see `nixlUcxSharedThread` in Troubleshooting. Same-node NIXL uses POSIX SHM, bypassing UCX TCP entirely and giving clean, reproducible results. The cross-cluster TTFT data is in Experiments A/B.
+
 **Distribution**: lognormal(μ=7, σ=1.5), clipped [256, 8192] tokens — median ~1100 tokens, 95th percentile ~3900 tokens. This matches the SOLBench / Chatbot Arena shape where most requests are short but a long tail drives KV transfer costs.
 
 **Setup**:
-1. Shared etcd + NATS running on prefill node (`10.117.9.173:2379` / `:4222`)
-2. Prefill worker on A10 (computelab): `dynamo.vllm --disaggregation-mode prefill`, `NixlConnector`, `UCX_TLS=tcp`
-3. Decode worker + frontend on H100 (dlcluster): `dynamo.vllm --disaggregation-mode decode` + `dynamo.frontend`
-4. `enforce_handshake_compat: false` on both workers (required for A10 SM80 ↔ H100 SM90)
+1. GPU 0: prefill worker (`dynamo.vllm --disaggregation-mode prefill`, `NixlConnector`)
+2. GPU 1: decode worker + frontend (`dynamo.vllm --disaggregation-mode decode` + `dynamo.frontend`)
+3. etcd + NATS on same node
+4. No cross-cluster config needed — same-node NIXL auto-selects SHM transport
 
 **Benchmark parameters**:
 - N=200 requests, c=8 concurrency
-- ISL: sampled from lognormal(μ=7, σ=1.5) dataset, clipped [256, 8192]
+- ISL: sampled from lognormal(μ=7, σ=1.5), clipped [256, 8192]
 - OSL: 256 tokens fixed
-- `enable_thinking: false`, `ignore_eos: true` (Qwen3-style thinking suppression, not used here but set for reproducibility)
-- Warmup: 1 request before measurement
+- `enable_thinking: false`, `ignore_eos: true`
+- 1 warmup request before timing
 
-**Measured results** (DeepSeek-R1-Distill-Llama-8B, BF16, max-model-len 8192):
+**Measured results** (DeepSeek-R1-Distill-Llama-8B, BF16, max-model-len 8192, benchmark duration 130.96s):
 
 | Metric | Value |
 |--------|-------|
-| Throughput | **TBD req/s** |
-| P50 latency | **TBD s** |
-| P95 latency | **TBD s** |
-| P99 latency | **TBD s** |
-| Success rate | **TBD / 200** |
+| Request throughput | **1.53 req/s** |
+| Output token throughput | **390.92 tokens/s** |
+| TTFT P50 | **2,440ms** |
+| TTFT P99 | **5,071ms** |
+| Request latency P50 | **5,235ms** |
+| Request latency P90 | **7,612ms** |
+| Request latency P99 | **7,867ms** |
+| Inter-token latency | **10.95ms** (std=0.02ms — very tight) |
+| Success rate | **200/200** |
 
-**Relation to Experiments A/B**: Exp A/B characterize the latency profile at fixed ISL with `max_tokens=1`. Exp E characterizes sustained throughput under realistic load with actual output generation (OSL=256). Together they give the full picture: A/B for TTFT scaling, E for production capacity.
+**Relation to Experiments A/B/C**: Exp C measured same-node throughput at fixed ISL=2048 (2.361 req/s, N=100). Exp E extends this with a lognormal ISL distribution and 2× more requests for tighter confidence intervals.
 
 To reproduce:
 
 ```bash
-# 1. Allocate sessions via compute-session MCP
-start_session(preset: "a10", name: "xdc-prefill")     # computelab A10
-start_session(preset: "dl-h100", name: "xdc-decode")  # dlcluster H100
+# 1. Allocate a 2-GPU node (dl-h100 has 2x H100)
+start_session(preset: "dl-h100", name: "exp-e")
 
-# 2. Start infra on prefill node
-INFRA_IP=<prefill_node_ip>
-docker run -d --name etcd --net=host quay.io/coreos/etcd:v3.5.12 etcd \
-  --listen-client-urls=http://0.0.0.0:2379 --advertise-client-urls=http://${INFRA_IP}:2379
-docker run -d --name nats --net=host nats:latest -js
+# 2. Run the combined experiment script
+bash /home/scratch.mkosec_hw/exp_e_h100_same_node.sh
 
-# 3. Launch prefill
-bash /home/scratch.mkosec_hw/xdc_prefill_launch.sh   # or examples/backends/vllm/launch/disagg_multi_cluster_prefill.sh
-
-# 4. Launch decode + frontend
-bash /home/scratch.mkosec_hw/xdc_decode_launch.sh    # or examples/backends/vllm/launch/disagg_multi_cluster_decode.sh
-
-# 5. Wait for health on decode node port 8000, then benchmark via aiperf-mcp
+# 3. Wait for health on :8000, then benchmark via aiperf-mcp
 mcp__aiperf-mcp__create_spec(...)
 mcp__aiperf-mcp__run_profile(...)
 ```
-
-See `examples/backends/vllm/launch/` for the full scripts. The key flags vs. Experiments A/B:
-- Added `"kv_connector_extra_config":{"enforce_handshake_compat":false}` — required for A10/H100 mixed architecture
-- `UCX_TLS=tcp UCX_SOCKADDR_TLS_PRIORITY=tcp NIXL_UCX_TLS=tcp` — required for cross-cluster TCP routing
-- `HF_HUB_OFFLINE=1` — model pre-cached at `/home/scratch.mkosec_hw/hf_cache`
 
 ## Prerequisites
 

@@ -1,0 +1,33 @@
+{
+  "experiment": "Exp E — Disaggregated serving throughput (NixlConnector, lognormal representative ISL)",
+  "hardware": "2x H100 PCIe 81GB same-node (dlcluster ipp2-0493)",
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "config": {
+    "N": 200,
+    "concurrency": 8,
+    "ISL_tokens": 2048,
+    "OSL_tokens": 256,
+    "benchmark_duration_s": 130.96,
+    "note": "ISL=2048 is the lognormal(mu=7, sigma=1.5) representative value used in the KVBM lognormal benchmark skill"
+  },
+  "results": {
+    "request_throughput_req_per_s": 1.53,
+    "output_token_throughput_tokens_per_s": 390.92,
+    "ttft_avg_ms": 2439.83,
+    "ttft_p50_ms": 2439.81,
+    "ttft_p90_ms": 4818.23,
+    "ttft_p99_ms": 5070.83,
+    "ttft_min_ms": 66.28,
+    "ttft_max_ms": 5071.08,
+    "request_latency_avg_ms": 5231.03,
+    "request_latency_p50_ms": 5234.62,
+    "request_latency_p90_ms": 7612.22,
+    "request_latency_p99_ms": 7866.64,
+    "inter_token_latency_avg_ms": 10.95,
+    "inter_token_latency_std_ms": 0.02,
+    "n_success": 200,
+    "n_total": 200
+  },
+  "aiperf_version": "0.6.0",
+  "nixl_transport": "POSIX SHM (same-node)"
+}
