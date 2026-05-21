@@ -124,7 +124,7 @@ spec:
           containers:
             - name: main
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
-    - name: VllmDecodeWorker
+    - name: decode
       podTemplate:
         spec:
           containers:

@@ -593,8 +593,8 @@ class TestAssembleFinalConfig:
         dgd_config = {
             "spec": {
                 "services": {
-                    "VllmPrefillWorker": {"componentType": "worker"},
-                    "VllmDecodeWorker": {"componentType": "worker"},
+                    "prefill": {"componentType": "worker"},
+                    "decode": {"componentType": "worker"},
                 }
             }
         }
@@ -604,10 +604,10 @@ class TestAssembleFinalConfig:
         )
 
         services = dgd_config["spec"]["services"]
-        assert services["VllmPrefillWorker"]["scalingAdapter"] == {"enabled": True}
-        assert services["VllmPrefillWorker"]["subComponentType"] == "prefill"
-        assert "scalingAdapter" not in services["VllmDecodeWorker"]
-        assert "subComponentType" not in services["VllmDecodeWorker"]
+        assert services["prefill"]["scalingAdapter"] == {"enabled": True}
+        assert services["prefill"]["subComponentType"] == "prefill"
+        assert "scalingAdapter" not in services["decode"]
+        assert "subComponentType" not in services["decode"]
 
     @pytest.mark.pre_merge
     @pytest.mark.gpu_0
@@ -1120,7 +1120,7 @@ class TestRunProfileSkipsInterpolationForAggConfig:
         # Simulate naive fallback result: agg config, resolved backend
         agg_dgd = {
             "metadata": {"name": "vllm-agg"},
-            "spec": {"services": {"Frontend": {}, "VllmWorker": {}}},
+            "spec": {"services": {"Frontend": {}, "worker": {}}},
         }
         pick_result = {
             "best_config_df": None,
@@ -1221,8 +1221,8 @@ class TestRunProfileSkipsInterpolationForAggConfig:
             "spec": {
                 "services": {
                     "Frontend": {},
-                    "VllmPrefillWorker": {},
-                    "VllmDecodeWorker": {},
+                    "prefill": {},
+                    "decode": {},
                 }
             },
         }

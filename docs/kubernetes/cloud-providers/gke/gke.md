@@ -126,7 +126,7 @@ spec:
   services:
     Frontend:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
-    VllmDecodeWorker:
+    decode:
 ​​      resources:
         limits:
           gpu: "3"

@@ -89,7 +89,7 @@ spec:
           name: planner-profile-data
     replicas: 1
     type: planner
-  - name: VllmDecodeWorker
+  - name: decode
     podTemplate:
       spec:
         containers:
@@ -111,7 +111,7 @@ spec:
           workingDir: /workspace/examples/backends/vllm
     replicas: 1
     type: decode
-  - name: VllmPrefillWorker
+  - name: prefill
     podTemplate:
       spec:
         containers:
