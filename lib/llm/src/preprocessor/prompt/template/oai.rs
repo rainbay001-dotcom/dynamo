@@ -1948,6 +1948,103 @@ NORMAL_MODE
         );
     }
 
+    #[test]
+    fn test_gemma4_template_renders_reasoning_content_segments() {
+        use super::tokcfg::ChatTemplate;
+        use super::{ContextMixins, HfTokenizerConfigJsonFormatter, OAIPromptFormatter};
+
+        let template = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/chat_templates/gemma4_tool.jinja"
+        ));
+        let chat_template: ChatTemplate = serde_json::from_value(serde_json::json!({
+            "bos_token": "<bos>",
+            "chat_template": template
+        }))
+        .unwrap();
+
+        let formatter =
+            HfTokenizerConfigJsonFormatter::new(chat_template, ContextMixins::new(&[])).unwrap();
+        assert!(formatter.template_handles_reasoning);
+
+        let request: NvCreateChatCompletionRequest = serde_json::from_value(serde_json::json!({
+            "model": "google/gemma-4-31b-it",
+            "chat_template_args": {"enable_thinking": true},
+            "messages": [
+                {"role": "user", "content": "Run two tools and report the marker filename."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": [
+                        "I should list the directory to find the marker filename.",
+                        "I should read the marker file after listing it.",
+                        "I now have enough tool context to answer."
+                    ],
+                    "tool_calls": [
+                        {
+                            "id": "toolu_01_ls",
+                            "type": "function",
+                            "function": {
+                                "name": "Bash",
+                                "arguments": "{\"command\":\"ls\"}"
+                            }
+                        },
+                        {
+                            "id": "toolu_02_read",
+                            "type": "function",
+                            "function": {
+                                "name": "Read",
+                                "arguments": "{\"file_path\":\"MARKER.txt\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "toolu_01_ls",
+                    "content": "MARKER.txt"
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "toolu_02_read",
+                    "content": "ok"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let rendered = formatter.render(&request).unwrap();
+        let first_thought = rendered
+            .find("I should list the directory to find the marker filename.")
+            .expect("first reasoning segment must render");
+        let first_call = rendered
+            .find("<|tool_call>call:Bash")
+            .expect("first tool call must render");
+        let second_thought = rendered
+            .find("I should read the marker file after listing it.")
+            .expect("second reasoning segment must render");
+        let second_call = rendered
+            .find("<|tool_call>call:Read")
+            .expect("second tool call must render");
+        let trailing_thought = rendered
+            .find("I now have enough tool context to answer.")
+            .expect("trailing reasoning segment must render");
+
+        assert!(
+            first_thought < first_call
+                && first_call < second_thought
+                && second_thought < second_call
+                && second_call < trailing_thought,
+            "reasoning_content segments must stay interleaved with tool calls, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("MARKER.txt"),
+            "tool result must still render, got: {}",
+            rendered
+        );
+    }
+
     /// Real Qwen3-4B-Thinking-2507 chat template (verbatim from
     /// `Qwen/Qwen3-4B-Thinking-2507/tokenizer_config.json`). Used to
     /// regression-test append-only rendering across multi-step tool use.

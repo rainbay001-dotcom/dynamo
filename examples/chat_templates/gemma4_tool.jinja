@@ -1,6 +1,6 @@
 {# SPDX-FileCopyrightText: Copyright contributors to the vLLM project, NVIDIA CORPORATION & AFFILIATES #}
 {# SPDX-License-Identifier: Apache-2.0 #}
-{# Verbatim copy of vllm/examples/tool_chat_template_gemma4.jinja, vendored for use with Dynamo's `gemma4` parsers. Pass via --custom-jinja-template. #}
+{# Adapted from vllm/examples/tool_chat_template_gemma4.jinja, vendored for use with Dynamo's `gemma4` parsers. Pass via --custom-jinja-template. #}
 {%- macro format_parameters(properties, required) -%}
     {%- set standard_keys = ['description', 'type', 'properties', 'required', 'nullable'] -%}
     {%- set ns = namespace(found_first=false) -%}
@@ -225,12 +225,18 @@
         {{- '<|turn>' + role + '\n' }}
     {%- endif -%}
 
-    {%- if message.get('reasoning') and loop.index0 > ns_turn.last_user_idx and message.get('tool_calls') -%}
-        {{- '<|channel>thought\n' + message['reasoning'] + '\n<channel|>'}}
+    {%- set message_idx = loop.index0 -%}
+    {%- set thinking_text = message.get('reasoning') or message.get('reasoning_content') -%}
+    {%- set thinking_segments = thinking_text is sequence and thinking_text is not string -%}
+    {%- if thinking_text and not thinking_segments and message_idx > ns_turn.last_user_idx and message.get('tool_calls') -%}
+        {{- '<|channel>thought\n' + thinking_text + '\n<channel|>'}}
     {%- endif -%}
 
             {%- if message['tool_calls'] -%}
                 {%- for tool_call in message['tool_calls'] -%}
+                    {%- if thinking_segments and message_idx > ns_turn.last_user_idx and loop.index0 < (thinking_text | length) and thinking_text[loop.index0] -%}
+                        {{- '<|channel>thought\n' + thinking_text[loop.index0] + '\n<channel|>'}}
+                    {%- endif -%}
                     {%- set function = tool_call['function'] -%}
                     {{- '<|tool_call>call:' + function['name'] + '{' -}}
                     {%- if function['arguments'] is mapping -%}
@@ -245,6 +251,9 @@
                     {%- endif -%}
                     {{- '}<tool_call|>' -}}
                 {%- endfor -%}
+                {%- if thinking_segments and message_idx > ns_turn.last_user_idx and (message['tool_calls'] | length) < (thinking_text | length) and thinking_text[message['tool_calls'] | length] -%}
+                    {{- '<|channel>thought\n' + thinking_text[message['tool_calls'] | length] + '\n<channel|>'}}
+                {%- endif -%}
                 {%- set ns.prev_message_type = 'tool_call' -%}
             {%- endif -%}
 
