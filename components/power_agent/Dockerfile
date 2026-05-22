@@ -32,19 +32,32 @@
 # nvidia-dcgm tag — the hostengine and the bindings should share a
 # major version (DCGM guarantees backward compat within a major, not
 # across).
-ARG DCGM_IMAGE=nvcr.io/nvidia/cloud-native/dcgm:4.2.3-2-ubuntu22.04
+#
+# The 4.2.3-2 tag is NOT published on NGC (verified 2026-05-21 via
+# `docker manifest inspect nvcr.io/nvidia/cloud-native/dcgm:4.2.3-2-ubuntu22.04`
+# → 404). The earliest resolvable DCGM 4.x runtime image is 4.5.1-1.
+# We pin to 4.5.1 because:
+#   - DcgmActuator uses `dcgm_structs.c_dcgmDeviceConfig_v2`, which only
+#     exists in DCGM 4.x (no 3.x fallback path);
+#   - 4.5.1 is the only 4.x ubuntu22.04 tag NGC currently publishes.
+ARG DCGM_IMAGE=nvcr.io/nvidia/cloud-native/dcgm:4.5.1-1-ubuntu22.04
 FROM ${DCGM_IMAGE} AS dcgm-vendor
 
-# pydcgm bindings live under /usr/share/datacenter-gpu-manager/sdk_samples/scripts
-# in the DCGM container image (these are the same bindings shipped under
-# DCGM/testing/python3/ in the source tree). The library lives at
-# /usr/lib/x86_64-linux-gnu/.
+# pydcgm bindings location changed between DCGM majors:
+#   3.x       → /usr/local/dcgm/bindings/python3/
+#   4.5+      → /usr/share/datacenter-gpu-manager-4/bindings/python3/
+# We target 4.5+ because that's what the DCGM_IMAGE default resolves to.
+# If you override DCGM_IMAGE to a 3.x tag, this COPY will fail loudly
+# (the *.py glob expands to nothing under `set -eux`, exit 1), which is
+# the correct failure mode — DcgmActuator's c_dcgmDeviceConfig_v2 usage
+# would crash mid-reconcile on 3.x bindings anyway.
 RUN set -eux; \
     mkdir -p /vendor/dcgm-python /vendor/dcgm-lib; \
-    # Python bindings: flat layout — copy every .py from the SDK samples \
-    # scripts dir (pydcgm.py imports from sibling modules like \
+    # Python bindings: flat layout — copy every .py from the bindings \
+    # dir (pydcgm.py imports from sibling modules like \
     # DcgmHandle.py, DcgmSystem.py, etc.). \
-    cp -a /usr/local/dcgm/bindings/python3/*.py /vendor/dcgm-python/; \
+    cp -a /usr/share/datacenter-gpu-manager-4/bindings/python3/*.py \
+        /vendor/dcgm-python/; \
     # libdcgm.so + module shared libs (DcgmActuator only needs the core, \
     # but the modules are dlopen()d by the hostengine on the *server* side \
     # which is in a separate Pod — we ship libdcgm.so + its versioned \
@@ -81,6 +94,16 @@ RUN pip install --no-cache-dir \
 # Vendored DCGM artifacts.
 COPY --from=dcgm-vendor /vendor/dcgm-python /opt/dcgm/python
 COPY --from=dcgm-vendor /vendor/dcgm-lib    /opt/dcgm/lib
+
+# Logger shim: the upstream NGC DCGM runtime image's pydcgm bindings
+# (`DcgmGroup.py:20`) `import logger` and call `logger.debug(...)` /
+# `logger.warning(...)`. The `logger.py` module that satisfies those
+# imports lives in DCGM's source tree under
+# `datacenter-gpu-manager-4/testing/python3/logger.py` and is NOT
+# packaged into the runtime image. Without this shim every DcgmGroup
+# construction fails with `ModuleNotFoundError: No module named 'logger'`.
+# `components/power_agent/logger.py` is a 10-line stdlib-logging adapter.
+COPY logger.py /opt/dcgm/python/logger.py
 
 # Agent sources.
 WORKDIR /app
