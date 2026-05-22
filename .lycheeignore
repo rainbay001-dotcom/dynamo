@@ -14,3 +14,16 @@
 # Redirects to networking-docs.nvidia.com which refuses connections from
 # GitHub runners (network/firewall). The page loads from a normal browser.
 ^https://docs\.nvidia\.com/networking/display/cokan10/network\+operator
+
+# Kubernetes cluster-internal DNS — `*.svc.cluster.local` is only
+# resolvable from inside the cluster. Used in planner defaults
+# (e.g. the in-cluster Prometheus endpoint in `defaults.py` and
+# `planner_config.py`).
+\.svc\.cluster\.local
+
+# Documentation placeholders for "fill in your real host/port".
+# Appear in planner config docstrings and the auto-generated platform
+# Helm chart README (`Format: "http://hostname:port"` etc.).
+^https?://hostname:port/?$
+^nats://hostname:port/?$
+^https?://host:port/?$
