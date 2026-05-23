@@ -9,9 +9,11 @@ and feature gap details.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -57,6 +59,31 @@ if TYPE_CHECKING:
     from dynamo._core.backend import EngineMetrics  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
+
+
+def _request_trace_enabled() -> bool:
+    return os.environ.get("DYN_REQUEST_TRACE_LOGGING", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _log_request_trace_event(event: str, request_id: str, **fields: Any) -> None:
+    if not _request_trace_enabled():
+        return
+
+    payload = {
+        "event": event,
+        "request_id": request_id,
+        "wall_time_ns": time.time_ns(),
+        **fields,
+    }
+    logger.info(
+        "dynamo_request_trace %s",
+        json.dumps(payload, separators=(",", ":"), sort_keys=True),
+    )
 
 
 class _UnifiedStatLogger(StatLoggerBase):
@@ -294,13 +321,28 @@ class VllmLLMEngine(LLMEngine):
         # Honour the router's DP rank decision; without it vLLM picks
         # its own rank and KV events land on the wrong publisher. vLLM
         # expects a local rank, so subtract this worker's `dp_start`.
+        rank: Optional[int] = None
         local_dp_rank: Optional[int] = None
+        dp_start: Optional[int] = None
+        dp_size: Optional[int] = None
         if self._dp_range is not None:
             dp_start, dp_size = self._dp_range
             rank = validate_global_dp_rank(
                 forced_dp_rank(request), dp_start, dp_size, "vLLM"
             )
             local_dp_rank = None if rank is None else rank - dp_start
+
+        _log_request_trace_event(
+            "backend_dp_enter",
+            request_id,
+            dp_rank=rank,
+            local_dp_rank=local_dp_rank,
+            dp_start=dp_start,
+            dp_size=dp_size,
+            prompt_tokens=len(token_ids),
+            requested_output_tokens=sampling_params.max_tokens,
+            disaggregation_mode=str(self.disaggregation_mode),
+        )
 
         gen = self.engine_client.generate(
             prompt,
@@ -313,48 +355,85 @@ class VllmLLMEngine(LLMEngine):
         is_prefill = self.disaggregation_mode == DisaggregationMode.PREFILL
 
         num_output_tokens_so_far: dict[int, int] = {}
-        async for res in gen:
-            if not res.outputs:
-                yield {
-                    "finish_reason": "error: No outputs from vLLM engine",
-                    "index": 0,
-                    "token_ids": [],
-                }
-                break
-
-            for output in res.outputs:
-                output_idx = getattr(output, "index", 0) or 0
-                previous_total = num_output_tokens_so_far.get(output_idx, 0)
-                next_total = len(output.token_ids)
-                out: GenerateChunk = {
-                    "index": output_idx,
-                    "token_ids": output.token_ids[previous_total:],
-                }
-
-                if output.finish_reason:
-                    out["finish_reason"] = str(output.finish_reason)
-                    prompt_tokens = (
-                        len(res.prompt_token_ids) if res.prompt_token_ids else 0
+        emitted_tokens = 0
+        first_output_logged = False
+        first_token_logged = False
+        try:
+            async for res in gen:
+                if not first_output_logged:
+                    _log_request_trace_event(
+                        "backend_dp_first_output",
+                        request_id,
+                        dp_rank=rank,
+                        local_dp_rank=local_dp_rank,
                     )
-                    completion_tokens = sum(
-                        len(choice.token_ids) for choice in res.outputs
-                    )
-                    out["completion_usage"] = {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": prompt_tokens + completion_tokens,
+                    first_output_logged = True
+
+                if not res.outputs:
+                    yield {
+                        "finish_reason": "error: No outputs from vLLM engine",
+                        "index": 0,
+                        "token_ids": [],
                     }
-                    # Stamp the connector's transfer handle on the
-                    # prefill terminal so PrefillRouter can forward it.
-                    if is_prefill:
-                        kv_transfer_params = getattr(res, "kv_transfer_params", None)
-                        if kv_transfer_params is not None:
-                            out["disaggregated_params"] = {
-                                "kv_transfer_params": kv_transfer_params,
-                            }
+                    break
 
-                yield out
-                num_output_tokens_so_far[output_idx] = next_total
+                for output in res.outputs:
+                    output_idx = getattr(output, "index", 0) or 0
+                    previous_total = num_output_tokens_so_far.get(output_idx, 0)
+                    next_total = len(output.token_ids)
+                    new_token_ids = output.token_ids[previous_total:]
+                    emitted_tokens += len(new_token_ids)
+                    if new_token_ids and not first_token_logged:
+                        _log_request_trace_event(
+                            "backend_dp_first_token",
+                            request_id,
+                            dp_rank=rank,
+                            local_dp_rank=local_dp_rank,
+                            output_index=output_idx,
+                            emitted_tokens=emitted_tokens,
+                        )
+                        first_token_logged = True
+                    out: GenerateChunk = {
+                        "index": output_idx,
+                        "token_ids": new_token_ids,
+                    }
+
+                    if output.finish_reason:
+                        out["finish_reason"] = str(output.finish_reason)
+                        prompt_tokens = (
+                            len(res.prompt_token_ids) if res.prompt_token_ids else 0
+                        )
+                        completion_tokens = sum(
+                            len(choice.token_ids) for choice in res.outputs
+                        )
+                        out["completion_usage"] = {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": prompt_tokens + completion_tokens,
+                        }
+                        # Stamp the connector's transfer handle on the
+                        # prefill terminal so PrefillRouter can forward it.
+                        if is_prefill:
+                            kv_transfer_params = getattr(
+                                res, "kv_transfer_params", None
+                            )
+                            if kv_transfer_params is not None:
+                                out["disaggregated_params"] = {
+                                    "kv_transfer_params": kv_transfer_params,
+                                }
+
+                    yield out
+                    num_output_tokens_so_far[output_idx] = next_total
+        finally:
+            _log_request_trace_event(
+                "backend_dp_done",
+                request_id,
+                dp_rank=rank,
+                local_dp_rank=local_dp_rank,
+                emitted_tokens=emitted_tokens,
+                saw_first_output=first_output_logged,
+                saw_first_token=first_token_logged,
+            )
 
     def _kv_routing_enabled(self) -> bool:
         # Matches the legacy `setup_kv_event_publisher` gate.

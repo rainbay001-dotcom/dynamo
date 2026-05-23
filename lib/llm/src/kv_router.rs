@@ -3,8 +3,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Instant,
+    sync::{Arc, OnceLock},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Result;
@@ -68,6 +68,28 @@ use crate::{
     },
     local_model::runtime_config::ModelRuntimeConfig,
 };
+
+fn request_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("DYN_REQUEST_TRACE_LOGGING")
+            .map(|value| {
+                matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn request_trace_wall_time_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or(0)
+}
 
 pub enum FindBestMatchOutcome {
     Routed {
@@ -819,6 +841,25 @@ where
         let prefill_load_hint =
             self.prefill_load_hint_for(isl_tokens, cached_tokens, track_prefill_tokens);
 
+        if request_trace_enabled() {
+            let payload = serde_json::json!({
+                "event": "router_request_tracked",
+                "request_id": &request_id,
+                "wall_time_ns": request_trace_wall_time_ns(),
+                "worker_id": worker.worker_id,
+                "dp_rank": worker.dp_rank,
+                "prompt_tokens": isl_tokens,
+                "cached_tokens": cached_tokens,
+                "expected_output_tokens": expected_output_tokens,
+                "track_prefill_tokens": track_prefill_tokens,
+            });
+            tracing::info!(
+                target: "dynamo_request_trace",
+                "dynamo_request_trace {}",
+                payload
+            );
+        }
+
         if let Err(e) = self
             .scheduler
             .add_request(SequenceRequest {
@@ -837,10 +878,34 @@ where
     }
 
     pub async fn mark_prefill_completed(&self, request_id: &str) -> Result<(), SequenceError> {
+        if request_trace_enabled() {
+            let payload = serde_json::json!({
+                "event": "router_prefill_completed",
+                "request_id": request_id,
+                "wall_time_ns": request_trace_wall_time_ns(),
+            });
+            tracing::info!(
+                target: "dynamo_request_trace",
+                "dynamo_request_trace {}",
+                payload
+            );
+        }
         self.scheduler.mark_prefill_completed(request_id).await
     }
 
     pub async fn free(&self, request_id: &str) -> Result<(), SequenceError> {
+        if request_trace_enabled() {
+            let payload = serde_json::json!({
+                "event": "router_request_freed",
+                "request_id": request_id,
+                "wall_time_ns": request_trace_wall_time_ns(),
+            });
+            tracing::info!(
+                target: "dynamo_request_trace",
+                "dynamo_request_trace {}",
+                payload
+            );
+        }
         self.scheduler.free(request_id).await
     }
 
@@ -1161,21 +1226,59 @@ where
                     Ok(FindBestMatchOutcome::Routed {
                         worker,
                         overlap_blocks,
+                        cached_tokens,
                         ..
-                    }) => RouterResponse::New {
-                        worker_id: worker.worker_id,
-                        dp_rank: worker.dp_rank,
-                        overlap_blocks,
-                    },
+                    }) => {
+                        if request_trace_enabled() {
+                            let payload = serde_json::json!({
+                                "event": "router_assigned",
+                                "request_id": &context_id,
+                                "wall_time_ns": request_trace_wall_time_ns(),
+                                "worker_id": worker.worker_id,
+                                "dp_rank": worker.dp_rank,
+                                "prompt_tokens": tokens.len(),
+                                "cached_tokens": cached_tokens,
+                                "overlap_blocks": overlap_blocks,
+                            });
+                            tracing::info!(
+                                target: "dynamo_request_trace",
+                                "dynamo_request_trace {}",
+                                payload
+                            );
+                        }
+                        RouterResponse::New {
+                            worker_id: worker.worker_id,
+                            dp_rank: worker.dp_rank,
+                            overlap_blocks,
+                        }
+                    }
                     Ok(FindBestMatchOutcome::Backpressure {
                         reason,
                         queued_isl_tokens,
                         max_queued_isl_tokens,
-                    }) => RouterResponse::Backpressure {
-                        reason,
-                        queued_isl_tokens,
-                        max_queued_isl_tokens,
-                    },
+                    }) => {
+                        if request_trace_enabled() {
+                            let payload = serde_json::json!({
+                                "event": "router_backpressure",
+                                "request_id": &context_id,
+                                "wall_time_ns": request_trace_wall_time_ns(),
+                                "reason": format!("{reason:?}"),
+                                "prompt_tokens": tokens.len(),
+                                "queued_isl_tokens": queued_isl_tokens,
+                                "max_queued_isl_tokens": max_queued_isl_tokens,
+                            });
+                            tracing::info!(
+                                target: "dynamo_request_trace",
+                                "dynamo_request_trace {}",
+                                payload
+                            );
+                        }
+                        RouterResponse::Backpressure {
+                            reason,
+                            queued_isl_tokens,
+                            max_queued_isl_tokens,
+                        }
+                    }
                     Err(error) => return Err(error),
                 }
             }
