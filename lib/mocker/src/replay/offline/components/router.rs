@@ -176,6 +176,7 @@ impl PendingRequest {
             allowed_worker_ids: None,
             routing_constraints: RoutingConstraints::default(),
             shared_cache_hits: None,
+            queued_at: None,
             resp_tx: None,
         }
     }
