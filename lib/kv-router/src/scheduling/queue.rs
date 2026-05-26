@@ -6,7 +6,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
@@ -25,7 +25,7 @@ use super::types::{
 };
 use crate::protocols::{
     LocalBlockHash, PrefillLoadHint, RouterBackpressureReason, WorkerConfigLike, WorkerId,
-    WorkerWithDpRank,
+    WorkerSelectionResult, WorkerWithDpRank,
 };
 use crate::sequences::{ActiveSequencesMultiWorker, SequencePublisher, SequenceRequest};
 
@@ -33,6 +33,66 @@ use crate::sequences::{ActiveSequencesMultiWorker, SequencePublisher, SequenceRe
 pub const DEFAULT_MAX_BATCHED_TOKENS: u64 = 10_000_000;
 
 const ADMISSION_CHANNEL_CAPACITY: usize = 65_536;
+const REQUEST_TRACE_MARKER: &str = "dynamo_request_trace";
+const REQUEST_TRACE_ENV: &str = "DYN_REQUEST_TRACE_LOGGING";
+
+fn request_trace_enabled() -> bool {
+    std::env::var(REQUEST_TRACE_ENV)
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn wall_time_ns() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn option_u32_json(value: Option<u32>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn worker_usize_map_json(map: &rustc_hash::FxHashMap<WorkerWithDpRank, usize>) -> String {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_unstable_by_key(|(worker, _)| (worker.worker_id, worker.dp_rank));
+
+    let mut json = String::from("{");
+    for (idx, (worker, value)) in entries.into_iter().enumerate() {
+        if idx > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "\"{}:{}\":{}",
+            worker.worker_id, worker.dp_rank, value
+        ));
+    }
+    json.push('}');
+    json
+}
 
 /// Entry in the priority queue, ordered by key (higher key = higher priority).
 struct QueueEntry<K: Ord + Eq> {
@@ -422,21 +482,26 @@ impl<
         let decay_now = Instant::now();
 
         let Some(threshold) = self.threshold_frac else {
-            self.admit_one(request, decay_now);
+            self.admit_one(request, decay_now, 0);
             return;
         };
 
         if eligibility.bypasses_capacity_check() {
-            self.admit_one(request, decay_now);
+            self.admit_one(request, decay_now, 0);
             return;
         }
 
         if self.all_workers_prefill_busy(threshold, request.eligibility(), decay_now) {
+            let tier_max_isl_tokens = if self.queue_depth_tiers.is_unbounded() {
+                None
+            } else {
+                self.tier_cap_for_request(&request)
+            };
             if !self.queue_depth_tiers.is_unbounded() {
                 let pending_isl_tokens = self.pending_isl_tokens.load(AtomicOrdering::Relaxed);
                 // This is a rejection threshold on current queued ISL, not a hard
                 // post-admission bound on `pending + incoming`.
-                if let Some(max_isl_tokens) = self.tier_cap_for_request(&request)
+                if let Some(max_isl_tokens) = tier_max_isl_tokens
                     && pending_isl_tokens >= max_isl_tokens
                 {
                     request.respond(Err(KvSchedulerError::Backpressure {
@@ -455,6 +520,15 @@ impl<
                     .enqueue_key(arrival_offset, SchedulingContext::new(&request, &workers))
             };
             let isl_tokens = request.isl_tokens;
+            let pending_count_before = self.pending_count.load(AtomicOrdering::Relaxed);
+            let pending_isl_tokens_before = self.pending_isl_tokens.load(AtomicOrdering::Relaxed);
+            self.trace_router_enqueued(
+                &request,
+                threshold,
+                pending_count_before,
+                pending_isl_tokens_before,
+                tier_max_isl_tokens,
+            );
             self.pending.push(QueueEntry {
                 key,
                 request,
@@ -467,7 +541,7 @@ impl<
             return;
         }
 
-        self.admit_one(request, decay_now);
+        self.admit_one(request, decay_now, 0);
     }
 
     async fn handle_update(&mut self) {
@@ -563,13 +637,19 @@ impl<
                 break;
             }
             tracing::debug!("scheduling request from pending queue");
-            self.admit_one(request, admit_now);
+            self.admit_one(request, admit_now, wait_ms);
         }
     }
 
     /// Run the full scheduling pipeline for a single request:
     /// compute potential load -> select worker -> respond -> book via add_request.
-    fn admit_one(&self, mut request: SchedulingRequest, decay_now: Instant) {
+    fn admit_one(
+        &self,
+        mut request: SchedulingRequest,
+        decay_now: Instant,
+        scheduler_queue_delay_ms: u64,
+    ) {
+        let state_snapshot_wall_time_ns = wall_time_ns();
         let (decode_blocks, prefill_tokens) = self.slots.potential_blocks_and_tokens_at(
             request.token_seq.as_deref(),
             &request.prefill_token_deltas(),
@@ -597,6 +677,13 @@ impl<
                 return;
             }
         };
+
+        self.trace_router_assigned(
+            &request,
+            &selection,
+            scheduler_queue_delay_ms,
+            state_snapshot_wall_time_ns,
+        );
 
         request.respond(Ok(SchedulingResponse {
             best_worker: selection.worker,
@@ -633,6 +720,104 @@ impl<
         ) {
             tracing::warn!("Failed to add request {request_id}: {e}");
         }
+    }
+
+    fn trace_router_enqueued(
+        &self,
+        request: &SchedulingRequest,
+        threshold_frac: f64,
+        pending_count_before: usize,
+        pending_isl_tokens_before: usize,
+        max_queued_isl_tokens: Option<usize>,
+    ) {
+        if !request_trace_enabled() {
+            return;
+        }
+        let Some(request_id) = request.maybe_request_id.as_deref() else {
+            return;
+        };
+
+        let pending_count_after = pending_count_before.saturating_add(1);
+        let pending_isl_tokens_after = pending_isl_tokens_before.saturating_add(request.isl_tokens);
+        let max_queued_isl_tokens = max_queued_isl_tokens
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "null".to_string());
+
+        tracing::info!(
+            "{} {{\"component\":\"kv_router\",\"event\":\"router_enqueued\",\"request_id\":\"{}\",\"wall_time_ns\":{},\"pid\":{},\"worker_selector_type\":\"{}\",\"routing_policy_type\":\"{}\",\"isl_tokens\":{},\"expected_output_tokens\":{},\"threshold_frac\":{},\"pending_count_before\":{},\"pending_count_after\":{},\"pending_isl_tokens_before\":{},\"pending_isl_tokens_after\":{},\"max_queued_isl_tokens\":{}}}",
+            REQUEST_TRACE_MARKER,
+            json_escape(request_id),
+            wall_time_ns(),
+            std::process::id(),
+            json_escape(std::any::type_name::<Sel>()),
+            json_escape(std::any::type_name::<S>()),
+            request.isl_tokens,
+            option_u32_json(request.expected_output_tokens),
+            threshold_frac,
+            pending_count_before,
+            pending_count_after,
+            pending_isl_tokens_before,
+            pending_isl_tokens_after,
+            max_queued_isl_tokens,
+        );
+    }
+
+    fn trace_router_assigned(
+        &self,
+        request: &SchedulingRequest,
+        selection: &WorkerSelectionResult,
+        scheduler_queue_delay_ms: u64,
+        state_snapshot_wall_time_ns: u128,
+    ) {
+        if !request_trace_enabled() {
+            return;
+        }
+        let Some(request_id) = request.maybe_request_id.as_deref() else {
+            return;
+        };
+
+        let decision_wall_time_ns = wall_time_ns();
+        let selected_decode_blocks = request
+            .decode_blocks
+            .get(&selection.worker)
+            .copied()
+            .unwrap_or_default();
+        let selected_prefill_tokens = request
+            .prefill_tokens
+            .get(&selection.worker)
+            .copied()
+            .unwrap_or_default();
+        let state_snapshot_age_ms =
+            decision_wall_time_ns.saturating_sub(state_snapshot_wall_time_ns) as f64 / 1_000_000.0;
+        let pending_count_at_admit = self.pending_count.load(AtomicOrdering::Relaxed);
+        let pending_isl_tokens_at_admit = self.pending_isl_tokens.load(AtomicOrdering::Relaxed);
+
+        tracing::info!(
+            "{} {{\"component\":\"kv_router\",\"event\":\"router_assigned\",\"request_id\":\"{}\",\"wall_time_ns\":{},\"pid\":{},\"worker_selector_type\":\"{}\",\"routing_policy_type\":\"{}\",\"worker_id\":{},\"dp_rank\":{},\"isl_tokens\":{},\"expected_output_tokens\":{},\"scheduler_queue_delay_ms\":{},\"state_snapshot_wall_time_ns\":{},\"state_snapshot_age_ms\":{},\"selected_decode_blocks\":{},\"selected_prefill_tokens\":{},\"effective_overlap_blocks\":{},\"cached_tokens\":{},\"pending_count_at_admit\":{},\"pending_isl_tokens_at_admit\":{},\"update_states\":{},\"track_prefill_tokens\":{},\"decode_blocks_by_rank\":{},\"prefill_tokens_by_rank\":{}}}",
+            REQUEST_TRACE_MARKER,
+            json_escape(request_id),
+            decision_wall_time_ns,
+            std::process::id(),
+            json_escape(std::any::type_name::<Sel>()),
+            json_escape(std::any::type_name::<S>()),
+            selection.worker.worker_id,
+            selection.worker.dp_rank,
+            request.isl_tokens,
+            option_u32_json(request.expected_output_tokens),
+            scheduler_queue_delay_ms,
+            state_snapshot_wall_time_ns,
+            state_snapshot_age_ms,
+            selected_decode_blocks,
+            selected_prefill_tokens,
+            selection.effective_overlap_blocks,
+            selection.cached_tokens,
+            pending_count_at_admit,
+            pending_isl_tokens_at_admit,
+            request.update_states,
+            request.track_prefill_tokens,
+            worker_usize_map_json(&request.decode_blocks),
+            worker_usize_map_json(&request.prefill_tokens),
+        );
     }
 
     fn prefill_load_hint_for(

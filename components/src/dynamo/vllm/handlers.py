@@ -52,6 +52,7 @@ from dynamo.common.multimodal.video_loader import VideoLoader
 from dynamo.common.utils import nvtx_utils as _nvtx
 from dynamo.common.utils.engine_response import normalize_finish_reason
 from dynamo.common.utils.input_params import InputParamManager
+from dynamo.common.utils.request_trace import trace_event
 from dynamo.common.utils.time_section import time_and_log_code_section
 from dynamo.llm import (
     KvEventPublisher,
@@ -97,6 +98,21 @@ logger = logging.getLogger(__name__)
 
 _GENERATE_REASONING_SUPPORT_CACHE_ATTR = "_dynamo_generate_reasoning_support"
 _DELTA_REQUEST_OUTPUT_KIND = RequestOutputKind.DELTA
+
+
+def _prompt_token_count(prompt: Any) -> int | None:
+    token_ids = getattr(prompt, "prompt_token_ids", None)
+    if token_ids is not None:
+        return len(token_ids)
+    if isinstance(prompt, dict):
+        token_ids = prompt.get("prompt_token_ids") or prompt.get("token_ids")
+        if token_ids is not None:
+            return len(token_ids)
+    return None
+
+
+def _mode_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
 
 
 class _DeferredAbort:
@@ -2134,6 +2150,23 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
                 request_id,
                 lora_request,
             )
+            trace_common = {
+                "component": "vllm",
+                "worker_type": _mode_value(self.config.disaggregation_mode),
+                "dp_rank": data_parallel_rank,
+                "priority": priority,
+                "prompt_tokens": _prompt_token_count(prompt),
+                "max_tokens": getattr(sampling_params, "max_tokens", None),
+                "output_kind": str(getattr(sampling_params, "output_kind", "")),
+                "lora_name": getattr(lora_request, "lora_name", None),
+            }
+            trace_event(
+                logger,
+                "backend_dp_enter",
+                request_id,
+                file_prefix="dynamo_request_trace_vllm",
+                **trace_common,
+            )
             gen = self.engine_client.generate(
                 prompt,
                 sampling_params,
@@ -2150,10 +2183,18 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
             )
 
             total_output_tokens_by_index: dict[int, int] = {}
+            first_token_emitted = False
             async for res in gen:
                 # res is vllm's RequestOutput
 
                 if not res.outputs:
+                    trace_event(
+                        logger,
+                        "backend_dp_no_output",
+                        request_id,
+                        file_prefix="dynamo_request_trace_vllm",
+                        **trace_common,
+                    )
                     self._log_with_lora_context(
                         "Request {request_id}{lora_info} returned no outputs",
                         request_id,
@@ -2181,6 +2222,18 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
                         continue
                     prepared_outputs.append(
                         (output, output_idx, token_ids, finish_reason, stop_reason)
+                    )
+
+                if not first_token_emitted and any(
+                    token_ids for _, _, token_ids, _, _ in prepared_outputs
+                ):
+                    first_token_emitted = True
+                    trace_event(
+                        logger,
+                        "backend_dp_first_token",
+                        request_id,
+                        file_prefix="dynamo_request_trace_vllm",
+                        **trace_common,
                     )
 
                 for (
@@ -2225,11 +2278,32 @@ class BaseWorkerHandler(ABC, Generic[RequestT, ResponseT]):
                             ),
                             finish_reason=finish_reason,
                         )
+                        trace_event(
+                            logger,
+                            "backend_dp_done",
+                            request_id,
+                            file_prefix="dynamo_request_trace_vllm",
+                            **trace_common,
+                            output_index=output_idx,
+                            output_tokens=total_output_tokens_by_index.get(
+                                output_idx, 0
+                            ),
+                            finish_reason=str(finish_reason),
+                        )
                     if stop_reason:
                         out["stop_reason"] = stop_reason
                     yield out
 
         except EngineDeadError as e:
+            trace_event(
+                logger,
+                "backend_dp_error",
+                request_id,
+                file_prefix="dynamo_request_trace_vllm",
+                error=type(e).__name__,
+                error_message=str(e),
+                dp_rank=data_parallel_rank,
+            )
             logger.error(f"vLLM EngineDeadError: {e}")
             logger.warning("Initiating Dynamo Runtime shutdown.")
             self.runtime.shutdown()
@@ -2511,6 +2585,22 @@ class DecodeWorkerHandler(BaseWorkerHandler):
 
         async with self._abort_monitor(context, request_id):
             try:
+                trace_common = {
+                    "component": "vllm",
+                    "worker_type": _mode_value(self.config.disaggregation_mode),
+                    "dp_rank": dp_rank,
+                    "priority": priority,
+                    "prompt_tokens": _prompt_token_count(prompt),
+                    "max_tokens": getattr(sampling_params, "max_tokens", None),
+                    "request_format": "openai_text",
+                }
+                trace_event(
+                    logger,
+                    "backend_dp_enter",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    **trace_common,
+                )
                 gen = self.engine_client.generate(
                     prompt,
                     sampling_params,
@@ -2520,8 +2610,16 @@ class DecodeWorkerHandler(BaseWorkerHandler):
                     priority=priority,
                 )
 
+                first_token_emitted = False
                 async for res in gen:
                     if not res.outputs:
+                        trace_event(
+                            logger,
+                            "backend_dp_no_output",
+                            request_id,
+                            file_prefix="dynamo_request_trace_vllm",
+                            **trace_common,
+                        )
                         yield {
                             "id": openai_request_id,
                             "created": int(time.time()),
@@ -2542,6 +2640,15 @@ class DecodeWorkerHandler(BaseWorkerHandler):
                         previous_text = previous_text_per_choice.get(output_idx, "")
                         # Calculate the delta text (new text since last chunk)
                         delta_text = output.text[len(previous_text) :]
+                        if not first_token_emitted and delta_text:
+                            first_token_emitted = True
+                            trace_event(
+                                logger,
+                                "backend_dp_first_token",
+                                request_id,
+                                file_prefix="dynamo_request_trace_vllm",
+                                **trace_common,
+                            )
 
                         choice_data = {
                             "index": output_idx,
@@ -2566,11 +2673,30 @@ class DecodeWorkerHandler(BaseWorkerHandler):
                             chunk["usage"] = BaseWorkerHandler._build_completion_usage(
                                 request_output=res,
                             )
+                            trace_event(
+                                logger,
+                                "backend_dp_done",
+                                request_id,
+                                file_prefix="dynamo_request_trace_vllm",
+                                **trace_common,
+                                output_index=output_idx,
+                                output_tokens=len(output.token_ids or []),
+                                finish_reason=str(output.finish_reason),
+                            )
 
                         yield chunk
                         previous_text_per_choice[output_idx] = output.text
 
             except EngineDeadError as e:
+                trace_event(
+                    logger,
+                    "backend_dp_error",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    error=type(e).__name__,
+                    error_message=str(e),
+                    dp_rank=dp_rank,
+                )
                 logger.error(f"vLLM EngineDeadError: {e}")
                 logger.warning("Initiating Dynamo Runtime shutdown.")
                 self.runtime.shutdown()
@@ -2702,6 +2828,22 @@ class PrefillWorkerHandler(BaseWorkerHandler):
 
         async with self._abort_monitor(context, request_id, is_prefill=True):
             try:
+                trace_common = {
+                    "component": "vllm",
+                    "worker_type": _mode_value(self.config.disaggregation_mode),
+                    "dp_rank": dp_rank,
+                    "priority": priority,
+                    "prompt_tokens": _prompt_token_count(prompt),
+                    "max_tokens": getattr(sampling_params, "max_tokens", None),
+                    "lora_name": getattr(lora_request, "lora_name", None),
+                }
+                trace_event(
+                    logger,
+                    "backend_dp_enter",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    **trace_common,
+                )
                 gen = self.engine_client.generate(
                     prompt,
                     sampling_params,
@@ -2717,15 +2859,34 @@ class PrefillWorkerHandler(BaseWorkerHandler):
                     ),
                 )
             except EngineDeadError as e:
+                trace_event(
+                    logger,
+                    "backend_dp_error",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    error=type(e).__name__,
+                    error_message=str(e),
+                    dp_rank=dp_rank,
+                )
                 logger.error(f"vLLM EngineDeadError: {e}")
                 logger.warning("Initiating Dynamo Runtime shutdown.")
                 self.runtime.shutdown()
                 os._exit(1)
 
+            first_token_emitted = False
             async for res in gen:
                 logger.debug(f"kv transfer params: {res.kv_transfer_params}")
 
                 token_ids = res.outputs[0].token_ids if res.outputs else []
+                if not first_token_emitted and token_ids:
+                    first_token_emitted = True
+                    trace_event(
+                        logger,
+                        "backend_dp_first_token",
+                        request_id,
+                        file_prefix="dynamo_request_trace_vllm",
+                        **trace_common,
+                    )
 
                 # For prefill worker, only one res will be generated,
                 # so we can always build embedding params here without conditionals
@@ -2753,6 +2914,15 @@ class PrefillWorkerHandler(BaseWorkerHandler):
                     lora_request,
                     level="info" if lora_request else "debug",
                     token_count=len(token_ids),
+                    has_kv_params=res.kv_transfer_params is not None,
+                )
+                trace_event(
+                    logger,
+                    "backend_dp_done",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    **trace_common,
+                    output_tokens=len(token_ids),
                     has_kv_params=res.kv_transfer_params is not None,
                 )
 

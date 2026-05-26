@@ -74,12 +74,20 @@ class DynamoStatLoggerPublisher(StatLoggerBase):
         self.component_gauges.set_gpu_cache_usage(
             dp_rank_str, scheduler_stats.kv_cache_usage
         )
+        running = getattr(scheduler_stats, "num_running_reqs", None)
+        if running is not None:
+            self.component_gauges.set_requests_running(dp_rank_str, int(running))
+        waiting = getattr(scheduler_stats, "num_waiting_reqs", None)
+        if waiting is not None:
+            self.component_gauges.set_requests_waiting(dp_rank_str, int(waiting))
 
     def init_publish(self) -> None:
         self.inner.publish(self.dp_rank, kv_used_blocks=0)
         dp_rank_str = str(self.dp_rank)
         self.component_gauges.set_total_blocks(dp_rank_str, 0)
         self.component_gauges.set_gpu_cache_usage(dp_rank_str, 0.0)
+        self.component_gauges.set_requests_running(dp_rank_str, 0)
+        self.component_gauges.set_requests_waiting(dp_rank_str, 0)
 
     def log_engine_initialized(self) -> None:
         pass

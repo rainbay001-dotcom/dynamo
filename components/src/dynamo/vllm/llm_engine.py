@@ -44,6 +44,7 @@ from dynamo.common.backend.metrics import (
 from dynamo.common.backend.publisher import ComponentSnapshot, KvEventSource, ZmqSource
 from dynamo.common.backend.worker import WorkerConfig
 from dynamo.common.constants import DisaggregationMode
+from dynamo.common.utils.request_trace import trace_event
 from dynamo.llm import ModelInput
 from dynamo.vllm.args import parse_args
 from dynamo.vllm.cache_info import (
@@ -308,6 +309,21 @@ class VllmLLMEngine(LLMEngine):
             )
             local_dp_rank = None if rank is None else rank - dp_start
 
+        trace_common = {
+            "component": "vllm",
+            "worker_type": str(self.disaggregation_mode),
+            "dp_rank": local_dp_rank,
+            "prompt_tokens": len(token_ids),
+            "max_tokens": getattr(sampling_params, "max_tokens", None),
+            "output_kind": str(getattr(sampling_params, "output_kind", "")),
+        }
+        trace_event(
+            logger,
+            "backend_dp_enter",
+            request_id,
+            file_prefix="dynamo_request_trace_vllm",
+            **trace_common,
+        )
         gen = self.engine_client.generate(
             prompt,
             sampling_params,
@@ -319,8 +335,16 @@ class VllmLLMEngine(LLMEngine):
         is_prefill = self.disaggregation_mode == DisaggregationMode.PREFILL
 
         total_output_tokens_by_index: dict[int, int] = {}
+        first_token_emitted = False
         async for res in gen:
             if not res.outputs:
+                trace_event(
+                    logger,
+                    "backend_dp_no_output",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    **trace_common,
+                )
                 yield {
                     "finish_reason": "error: No outputs from vLLM engine",
                     "index": 0,
@@ -339,6 +363,18 @@ class VllmLLMEngine(LLMEngine):
                 if not token_ids and not finish_reason:
                     continue
                 prepared_outputs.append((output_idx, token_ids, finish_reason))
+
+            if not first_token_emitted and any(
+                token_ids for _, token_ids, _ in prepared_outputs
+            ):
+                first_token_emitted = True
+                trace_event(
+                    logger,
+                    "backend_dp_first_token",
+                    request_id,
+                    file_prefix="dynamo_request_trace_vllm",
+                    **trace_common,
+                )
 
             for output_idx, token_ids, finish_reason in prepared_outputs:
                 out: GenerateChunk = {
@@ -365,6 +401,16 @@ class VllmLLMEngine(LLMEngine):
                             out["disaggregated_params"] = {
                                 "kv_transfer_params": kv_transfer_params,
                             }
+                    trace_event(
+                        logger,
+                        "backend_dp_done",
+                        request_id,
+                        file_prefix="dynamo_request_trace_vllm",
+                        **trace_common,
+                        output_index=output_idx,
+                        output_tokens=sum(total_output_tokens_by_index.values()),
+                        finish_reason=str(finish_reason),
+                    )
 
                 yield out
 

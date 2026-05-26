@@ -397,6 +397,20 @@ class LLMBackendMetrics:
             registry=registry,
             multiprocess_mode="max",
         )
+        self.requests_running = Gauge(
+            f"{name_prefix.COMPONENT}_vllm_dp_requests_running",
+            "Current vLLM running request count by data-parallel rank.",
+            labelnames=[labels.MODEL, labels.COMPONENT, labels.DP_RANK],
+            registry=registry,
+            multiprocess_mode="max",
+        )
+        self.requests_waiting = Gauge(
+            f"{name_prefix.COMPONENT}_vllm_dp_requests_waiting",
+            "Current vLLM waiting request count by data-parallel rank.",
+            labelnames=[labels.MODEL, labels.COMPONENT, labels.DP_RANK],
+            registry=registry,
+            multiprocess_mode="max",
+        )
         self.model_load_time = Gauge(
             f"{name_prefix.COMPONENT}_{model_info.LOAD_TIME_SECONDS}",
             "Model load time in seconds.",
@@ -427,6 +441,24 @@ class LLMBackendMetrics:
 
     def set_kv_cache_hit_rate(self, dp_rank: str, value: float) -> None:
         self.kv_cache_hit_rate.labels(
+            **{
+                labels.MODEL: self.model_name,
+                labels.COMPONENT: self.component_name,
+                labels.DP_RANK: dp_rank,
+            }
+        ).set(value)
+
+    def set_requests_running(self, dp_rank: str, value: int) -> None:
+        self.requests_running.labels(
+            **{
+                labels.MODEL: self.model_name,
+                labels.COMPONENT: self.component_name,
+                labels.DP_RANK: dp_rank,
+            }
+        ).set(value)
+
+    def set_requests_waiting(self, dp_rank: str, value: int) -> None:
+        self.requests_waiting.labels(
             **{
                 labels.MODEL: self.model_name,
                 labels.COMPONENT: self.component_name,

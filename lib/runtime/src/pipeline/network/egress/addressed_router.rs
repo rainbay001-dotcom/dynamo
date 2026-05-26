@@ -39,6 +39,51 @@ use tokio_stream::{StreamExt, StreamNotifyClose, wrappers::ReceiverStream};
 use tracing::Instrument;
 
 const CONTROL_MESSAGE_MAX_BYTES: usize = 128 * 1024;
+const REQUEST_TRACE_MARKER: &str = "dynamo_request_trace";
+const REQUEST_TRACE_ENV: &str = "DYN_REQUEST_TRACE_LOGGING";
+
+fn request_trace_enabled() -> bool {
+    std::env::var(REQUEST_TRACE_ENV)
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn wall_time_ns() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
+fn trace_request_plane_event(event: &str, request_id: &str, fields: serde_json::Value) {
+    if !request_trace_enabled() || request_id.is_empty() {
+        return;
+    }
+
+    let mut payload = match fields {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    payload.insert("component".to_string(), serde_json::json!("request_plane"));
+    payload.insert("event".to_string(), serde_json::json!(event));
+    payload.insert("request_id".to_string(), serde_json::json!(request_id));
+    payload.insert(
+        "wall_time_ns".to_string(),
+        serde_json::json!(wall_time_ns()),
+    );
+    payload.insert("pid".to_string(), serde_json::json!(std::process::id()));
+
+    tracing::info!(
+        "{} {}",
+        REQUEST_TRACE_MARKER,
+        serde_json::Value::Object(payload)
+    );
+}
 
 fn serialize_control_message(control_message: &RequestControlMessage) -> Result<Vec<u8>, Error> {
     let ctrl = serde_json::to_vec(control_message)?;
@@ -202,6 +247,7 @@ where
         let inflight_guard = InflightGuard::new();
 
         let request_id = request.context().id().to_string();
+        trace_request_plane_event("request_plane_enqueue", &request_id, serde_json::json!({}));
         let (addressed_request, context) = request.transfer(());
         let (request, address, instance_info) = addressed_request.into_parts();
         let engine_ctx = context.context();
@@ -298,6 +344,8 @@ where
             data.len()
         );
 
+        let control_bytes = ctrl.len();
+        let data_bytes = data.len();
         let msg = TwoPartMessage::from_parts(ctrl.into(), data.into());
 
         // the request plane / work queue should provide a two part message codec that can be used
@@ -314,8 +362,20 @@ where
             }
         };
 
-        REQUEST_PLANE_QUEUE_SECONDS.observe(queue_start.elapsed().as_secs_f64());
+        let queue_seconds = queue_start.elapsed().as_secs_f64();
+        REQUEST_PLANE_QUEUE_SECONDS.observe(queue_seconds);
         let tx_start = Instant::now();
+        trace_request_plane_event(
+            "request_plane_send_start",
+            &request_id,
+            serde_json::json!({
+                "queue_seconds": queue_seconds,
+                "transport": self.req_client.transport_name(),
+                "address": address.clone(),
+                "control_bytes": control_bytes,
+                "data_bytes": data_bytes,
+            }),
+        );
 
         // TRANSPORT ABSTRACT REQUIRED - END HERE
 
@@ -351,7 +411,17 @@ where
             }
             return Err(e);
         }
-        REQUEST_PLANE_SEND_SECONDS.observe(tx_start.elapsed().as_secs_f64());
+        let send_seconds = tx_start.elapsed().as_secs_f64();
+        REQUEST_PLANE_SEND_SECONDS.observe(send_seconds);
+        trace_request_plane_event(
+            "request_plane_send_done",
+            &request_id,
+            serde_json::json!({
+                "queue_seconds": queue_seconds,
+                "send_seconds": send_seconds,
+                "transport": self.req_client.transport_name(),
+            }),
+        );
 
         let _nvtx_wait = dynamo_nvtx_range!("transport.tcp.wait_backend");
         tracing::trace!(request_id, "awaiting transport handshake");
@@ -407,6 +477,15 @@ where
                     first_response = false;
                     let roundtrip_ttft = tx_start.elapsed().as_secs_f64();
                     REQUEST_PLANE_ROUNDTRIP_TTFT_SECONDS.observe(roundtrip_ttft);
+                    trace_request_plane_event(
+                        "request_plane_first_response",
+                        &request_id,
+                        serde_json::json!({
+                            "queue_seconds": queue_seconds,
+                            "send_seconds": send_seconds,
+                            "roundtrip_ttft_seconds": roundtrip_ttft,
+                        }),
+                    );
                     STAGE_DURATION_SECONDS
                         .with_label_values(&["transport_roundtrip"])
                         .observe(queue_start.elapsed().as_secs_f64());
