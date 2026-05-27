@@ -26,7 +26,7 @@ from dynamo.llm import (
 )
 from dynamo.sglang._compat import get_scheduler_info
 from dynamo.sglang._disagg import SGLANG_WORKER_GROUP_ID_KEY, get_sglang_worker_group_id
-from dynamo.sglang.args import DynamoConfig
+from dynamo.sglang.args import DynamoConfig, uses_modelexpress_remote_instance
 from dynamo.sglang.capacity import local_dp_rank_bounds, runtime_capacity
 
 SGLANG_HICACHE_MOONCAKE_RUNTIME_KEY = "sglang_hicache_mooncake"
@@ -113,6 +113,7 @@ async def _register_model_with_runtime_config(
             media_fetcher=media_fetcher,
             worker_type=worker_type,
             needs=needs,
+            ignore_weights=uses_modelexpress_remote_instance(server_args),
         )
         logging.info("Successfully registered LLM with runtime config")
         return True
