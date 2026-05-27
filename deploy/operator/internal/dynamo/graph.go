@@ -44,8 +44,10 @@ import (
 	networkingv1beta1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -359,6 +361,7 @@ func generateSingleDCD(
 		return nil, err
 	}
 	delete(deployment.Annotations, commonconsts.KubeAnnotationTopologyLabelKey)
+	delete(deployment.Annotations, commonconsts.KubeAnnotationTopologyClusterTopologyName)
 
 	labels := make(map[string]string)
 	maps.Copy(labels, GetPodTemplateLabels(component))
@@ -404,7 +407,7 @@ func generateSingleDCD(
 		if deployment.Annotations == nil {
 			deployment.Annotations = make(map[string]string)
 		}
-		deployment.Annotations[commonconsts.KubeAnnotationTopologyLabelKey] = parentDGD.Spec.Experimental.KvTransferPolicy.LabelKey
+		applyKvTransferPolicyTopologyAnnotations(deployment.Annotations, parentDGD.Spec.Experimental.KvTransferPolicy)
 	}
 
 	// Apply restart annotation if this component should be restarted.
@@ -1764,6 +1767,27 @@ func GeneratePodSpecForComponent(
 	checkpointInfo *checkpoint.CheckpointInfo,
 	deployerOverride MultinodeDeployer,
 ) (*corev1.PodSpec, error) {
+	return generatePodSpecForComponent(
+		component, backendFramework, secretsRetriever, dynamoDeployment,
+		role, numberOfNodes, operatorConfig, multinodeDeploymentType,
+		serviceName, checkpointInfo, deployerOverride, nil,
+	)
+}
+
+func generatePodSpecForComponent(
+	component *v1beta1.DynamoComponentDeploymentSharedSpec,
+	backendFramework BackendFramework,
+	secretsRetriever SecretsRetriever,
+	dynamoDeployment *v1beta1.DynamoGraphDeployment,
+	role Role,
+	numberOfNodes int32,
+	operatorConfig *configv1alpha1.OperatorConfiguration,
+	multinodeDeploymentType commonconsts.MultinodeDeploymentType,
+	serviceName string,
+	checkpointInfo *checkpoint.CheckpointInfo,
+	deployerOverride MultinodeDeployer,
+	kvTransferTopologyDomains []v1beta1.TopologyDomain,
+) (*corev1.PodSpec, error) {
 	if component == nil {
 		return nil, fmt.Errorf("component is nil")
 	}
@@ -1771,7 +1795,7 @@ func GeneratePodSpecForComponent(
 		return nil, fmt.Errorf("dynamoDeployment is nil")
 	}
 	component = component.DeepCopy()
-	applyDGDTemplateDefaults(component, dynamoDeployment)
+	applyDGDTemplateDefaults(component, dynamoDeployment, kvTransferTopologyDomains)
 	if operatorConfig == nil {
 		operatorConfig = &configv1alpha1.OperatorConfiguration{}
 	}
@@ -1786,6 +1810,7 @@ func GeneratePodSpecForComponent(
 func applyDGDTemplateDefaults(
 	component *v1beta1.DynamoComponentDeploymentSharedSpec,
 	dynamoDeployment *v1beta1.DynamoGraphDeployment,
+	kvTransferTopologyDomains ...[]v1beta1.TopologyDomain,
 ) {
 	if component == nil || dynamoDeployment == nil {
 		return
@@ -1801,7 +1826,11 @@ func applyDGDTemplateDefaults(
 	// lacks the parent DGD). Workers publish these in their MDC so the router
 	// reads policy per-worker.
 	if shouldApplyKvTransferPolicyToWorkerComponent(component, dynamoDeployment) {
-		applyKvTransferPolicyToWorkerComponent(component, dynamoDeployment.Spec.Experimental.KvTransferPolicy)
+		var topologyDomains []v1beta1.TopologyDomain
+		if len(kvTransferTopologyDomains) > 0 {
+			topologyDomains = kvTransferTopologyDomains[0]
+		}
+		applyKvTransferPolicyToWorkerComponent(component, dynamoDeployment.Spec.Experimental.KvTransferPolicy, topologyDomains)
 	}
 
 	propagateDGDAnnotations(dynamoDeployment.GetAnnotations(), component)
@@ -1816,13 +1845,15 @@ func shouldApplyKvTransferPolicyToWorkerComponent(
 		dynamoDeployment != nil &&
 		dynamoDeployment.Spec.Experimental != nil &&
 		dynamoDeployment.Spec.Experimental.KvTransferPolicy != nil &&
-		dynamoDeployment.Spec.Experimental.KvTransferPolicy.LabelKey != "" &&
+		(dynamoDeployment.Spec.Experimental.KvTransferPolicy.LabelKey != "" ||
+			dynamoDeployment.Spec.Experimental.KvTransferPolicy.ClusterTopologyName != "") &&
 		IsWorkerComponent(string(component.ComponentType))
 }
 
 func applyKvTransferPolicyToWorkerComponent(
 	component *v1beta1.DynamoComponentDeploymentSharedSpec,
 	kvt *v1beta1.KvTransferPolicy,
+	kvTransferTopologyDomains []v1beta1.TopologyDomain,
 ) {
 	if component == nil || kvt == nil {
 		return
@@ -1831,7 +1862,24 @@ func applyKvTransferPolicyToWorkerComponent(
 	main := ensureMainContainer(podTemplate)
 	main.Env = MergeEnvs(removeWorkerKvTransferPolicyEnvVars(main.Env), workerKvTransferPolicyEnvVars(kvt))
 	main.VolumeMounts = appendTopologyLabelVolumeMount(main.VolumeMounts, TopologyLabelVolumeMount())
-	podTemplate.Spec.Volumes = appendTopologyLabelVolume(podTemplate.Spec.Volumes, TopologyLabelVolume(kvt))
+	podTemplate.Spec.Volumes = appendTopologyLabelVolume(podTemplate.Spec.Volumes, TopologyLabelVolume(kvt, kvTransferTopologyDomains))
+}
+
+func applyKvTransferPolicyTopologyAnnotations(annotations map[string]string, kvt *v1beta1.KvTransferPolicy) {
+	if annotations == nil {
+		return
+	}
+	delete(annotations, commonconsts.KubeAnnotationTopologyLabelKey)
+	delete(annotations, commonconsts.KubeAnnotationTopologyClusterTopologyName)
+	if kvt == nil {
+		return
+	}
+	if kvt.LabelKey != "" {
+		annotations[commonconsts.KubeAnnotationTopologyLabelKey] = kvt.LabelKey
+	}
+	if kvt.ClusterTopologyName != "" {
+		annotations[commonconsts.KubeAnnotationTopologyClusterTopologyName] = kvt.ClusterTopologyName
+	}
 }
 
 func workerKvTransferPolicyEnvVars(kvt *v1beta1.KvTransferPolicy) []corev1.EnvVar {
@@ -1962,6 +2010,7 @@ type cliqueParams struct {
 	validatedQueueName         string
 	kubeClient                 ctrlclient.Client
 	ctx                        context.Context
+	kvTransferTopologyDomains  []v1beta1.TopologyDomain
 }
 
 // buildCliqueForRole generates a single PodCliqueTemplateSpec for the given role,
@@ -1970,6 +2019,7 @@ func buildCliqueForRole(p cliqueParams) (*grovev1alpha1.PodCliqueTemplateSpec, e
 	podSpec, err := generatePodSpecForRole(
 		p.r, p.component, p.backendFramework, p.secretsRetriever,
 		p.dynamoDeployment, p.numberOfNodes, p.operatorConfig, p.componentName, p.checkpointInfo,
+		p.kvTransferTopologyDomains,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate podSpec for role %s: %w", p.r.Name, err)
@@ -2058,8 +2108,9 @@ func buildCliqueForRole(p cliqueParams) (*grovev1alpha1.PodCliqueTemplateSpec, e
 		return nil, fmt.Errorf("failed to generate annotations: %w", err)
 	}
 	delete(annotations, commonconsts.KubeAnnotationTopologyLabelKey)
+	delete(annotations, commonconsts.KubeAnnotationTopologyClusterTopologyName)
 	if p.r.Role != RoleGMS && shouldApplyKvTransferPolicyToWorkerComponent(p.component, p.dynamoDeployment) {
-		annotations[commonconsts.KubeAnnotationTopologyLabelKey] = p.dynamoDeployment.Spec.Experimental.KvTransferPolicy.LabelKey
+		applyKvTransferPolicyTopologyAnnotations(annotations, p.dynamoDeployment.Spec.Experimental.KvTransferPolicy)
 	}
 	if p.r.Role != RoleGMS {
 		if err := checkpoint.ApplyRestorePodMetadataWithStorageConfig(labels, annotations, p.checkpointInfo, p.operatorConfig.Checkpoint.Storage); err != nil {
@@ -2090,6 +2141,50 @@ func applyRestartAnnotation(annotations map[string]string, componentName string,
 		}
 	}
 	return annotations
+}
+
+func resolveKvTransferTopologyDomains(ctx context.Context, kubeClient ctrlclient.Client, kvt *v1beta1.KvTransferPolicy) ([]v1beta1.TopologyDomain, error) {
+	if kvt == nil || kvt.ClusterTopologyName == "" {
+		return nil, nil
+	}
+	if kubeClient == nil {
+		return nil, fmt.Errorf("spec.experimental.kvTransferPolicy.clusterTopologyName %q requires a Kubernetes client to read ClusterTopology", kvt.ClusterTopologyName)
+	}
+
+	ct := &grovev1alpha1.ClusterTopology{}
+	if err := kubeClient.Get(ctx, types.NamespacedName{Name: kvt.ClusterTopologyName}, ct); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, fmt.Errorf("spec.experimental.kvTransferPolicy.clusterTopologyName %q references a ClusterTopology resource that was not found", kvt.ClusterTopologyName)
+		}
+		return nil, fmt.Errorf("failed to read ClusterTopology %q for kvTransferPolicy: %w", kvt.ClusterTopologyName, err)
+	}
+
+	domains := topologyDomainsFromClusterTopology(ct)
+	if !topologyDomainsContain(domains, kvt.Domain) {
+		return nil, fmt.Errorf("spec.experimental.kvTransferPolicy.domain %q does not exist in ClusterTopology %q; available domains: %v",
+			kvt.Domain, kvt.ClusterTopologyName, domains)
+	}
+	return domains, nil
+}
+
+func topologyDomainsFromClusterTopology(ct *grovev1alpha1.ClusterTopology) []v1beta1.TopologyDomain {
+	if ct == nil {
+		return nil
+	}
+	domains := make([]v1beta1.TopologyDomain, 0, len(ct.Spec.Levels))
+	for _, level := range ct.Spec.Levels {
+		domains = append(domains, v1beta1.TopologyDomain(level.Domain))
+	}
+	return domains
+}
+
+func topologyDomainsContain(domains []v1beta1.TopologyDomain, want v1beta1.TopologyDomain) bool {
+	for _, domain := range domains {
+		if domain == want {
+			return true
+		}
+	}
+	return false
 }
 
 func GenerateGrovePodCliqueSet(
@@ -2137,6 +2232,15 @@ func GenerateGrovePodCliqueSet(
 
 	discoveryBackend := controller_common.GetDiscoveryBackend(operatorConfig.Discovery.Backend, dynamoDeployment.Annotations)
 	discoveryContext := NewDiscoveryContext(operatorConfig.Discovery.Backend, dynamoDeployment.Annotations)
+
+	var kvTransferTopologyDomains []v1beta1.TopologyDomain
+	if dynamoDeployment.Spec.Experimental != nil {
+		var err error
+		kvTransferTopologyDomains, err = resolveKvTransferTopologyDomains(ctx, kubeClient, dynamoDeployment.Spec.Experimental.KvTransferPolicy)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	var scalingGroups []grovev1alpha1.PodCliqueScalingGroupConfig
 	var resourceClaimTemplates []grovev1alpha1.ResourceClaimTemplateConfig
@@ -2196,6 +2300,7 @@ func GenerateGrovePodCliqueSet(
 				validatedQueueName:         validatedQueueName,
 				kubeClient:                 kubeClient,
 				ctx:                        ctx,
+				kvTransferTopologyDomains:  kvTransferTopologyDomains,
 			})
 			if err != nil {
 				return nil, err
@@ -2250,15 +2355,17 @@ func generatePodSpecForRole(
 	operatorConfig *configv1alpha1.OperatorConfiguration,
 	serviceName string,
 	checkpointInfo *checkpoint.CheckpointInfo,
+	kvTransferTopologyDomains []v1beta1.TopologyDomain,
 ) (*corev1.PodSpec, error) {
 	isInterPodGMS := component.IsInterPodGMSEnabled()
 
 	if r.Role == RoleGMS {
 		// GMS weight server: generate a base engine spec then transform it
-		basePodSpec, err := GeneratePodSpecForComponent(
+		basePodSpec, err := generatePodSpecForComponent(
 			component, backendFramework, secretsRetriever, dynamoDeployment,
 			RoleMain, 1, operatorConfig,
 			commonconsts.MultinodeDeploymentTypeGrove, serviceName, checkpointInfo, nil,
+			kvTransferTopologyDomains,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate base podSpec for GMS: %w", err)
@@ -2276,10 +2383,11 @@ func generatePodSpecForRole(
 		deployer = &GroveMultinodeDeployer{IsInterPodGMS: true, Rank: r.Rank}
 	}
 
-	podSpec, err := GeneratePodSpecForComponent(
+	podSpec, err := generatePodSpecForComponent(
 		component, backendFramework, secretsRetriever, dynamoDeployment,
 		r.Role, numberOfNodes, operatorConfig,
 		commonconsts.MultinodeDeploymentTypeGrove, serviceName, checkpointInfo, deployer,
+		kvTransferTopologyDomains,
 	)
 	if err != nil {
 		return nil, err
