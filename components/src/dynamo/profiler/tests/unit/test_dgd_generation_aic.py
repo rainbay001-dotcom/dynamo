@@ -412,8 +412,8 @@ class TestEnableVllmBenchmarkMode:
         cfg = {
             "spec": {
                 "services": {
-                    "prefill": {},
-                    "decode": {},
+                    "custom-svc-a": {},
+                    "custom-svc-b": {},
                     "Frontend": {},
                 }
             }
