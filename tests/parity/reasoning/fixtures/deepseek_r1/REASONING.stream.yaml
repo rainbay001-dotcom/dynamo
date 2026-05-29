@@ -114,3 +114,12 @@ cases:
         normal_text: ''
       vllm: *d_s4
       sglang: *d_s4
+  REASONING.stream.4.a:
+    description: Downstream streaming boundary is not applicable to DeepSeek R1-family parsers
+    reason: DeepSeek R1-family parsers have no configured Harmony commentary boundary; closed-span handoff is covered by REASONING.batch.3.a.
+  REASONING.stream.4.b:
+    description: Split downstream streaming boundary is not applicable to DeepSeek R1-family parsers
+    reason: DeepSeek R1-family parsers have no Harmony `commentary to=functions.*` stream boundary to split across chunks.
+  REASONING.stream.4.c:
+    description: Partial downstream boundary recovery is not applicable to DeepSeek R1-family parsers
+    reason: DeepSeek R1-family parsers have no Harmony commentary protocol, so partial commentary-boundary recovery is outside their grammar.

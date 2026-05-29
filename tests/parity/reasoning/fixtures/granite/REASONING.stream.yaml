@@ -109,3 +109,12 @@ cases:
       vllm: *d_s4
       sglang:
         unavailable: SGLang has no reasoning parser for family='granite'
+  REASONING.stream.4.a:
+    description: Downstream streaming boundary is not applicable to Granite
+    reason: Granite has no configured Harmony commentary boundary; it has no paired Dynamo Harmony tool-call parser fixture.
+  REASONING.stream.4.b:
+    description: Split downstream streaming boundary is not applicable to Granite
+    reason: Granite has no Harmony `commentary to=functions.*` stream boundary to split across chunks.
+  REASONING.stream.4.c:
+    description: Partial downstream boundary recovery is not applicable to Granite
+    reason: Granite has no Harmony commentary protocol, so partial commentary-boundary recovery is outside its grammar.

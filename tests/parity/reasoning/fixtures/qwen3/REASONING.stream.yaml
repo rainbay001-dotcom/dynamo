@@ -118,3 +118,12 @@ cases:
         normal_text: ''
         reason: vLLM Qwen streaming parser treats text before a reasoning end marker as reasoning; serving may bypass it when thinking is disabled.
       sglang: *d_s4
+  REASONING.stream.4.a:
+    description: Downstream streaming boundary is not applicable to Qwen3
+    reason: Qwen3 has no configured tool-call start marker that force-exits open streaming reasoning; closed-span handoff is covered by REASONING.batch.3.a.
+  REASONING.stream.4.b:
+    description: Split downstream streaming boundary is not applicable to Qwen3
+    reason: Qwen3 has no configured tool-call start marker that force-exits open streaming reasoning, so there is no split downstream boundary to buffer.
+  REASONING.stream.4.c:
+    description: Partial downstream boundary recovery is not applicable to Qwen3
+    reason: Qwen3 has no configured tool-call start marker that force-exits open streaming reasoning, so partial tool-marker recovery is outside its grammar.

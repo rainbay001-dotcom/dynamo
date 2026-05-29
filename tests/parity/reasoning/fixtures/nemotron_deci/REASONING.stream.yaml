@@ -122,3 +122,12 @@ cases:
         normal_text: ''
         reason: vLLM GLM/Nemotron parser (`glm45`) defaults thinking on and routes marker-free deltas to reasoning.
       sglang: *id001
+  REASONING.stream.4.a:
+    description: Downstream streaming boundary is not applicable to GLM/Nemotron
+    reason: GLM/Nemotron parsers have no configured Harmony commentary boundary; closed-span handoff is covered by REASONING.batch.3.a.
+  REASONING.stream.4.b:
+    description: Split downstream streaming boundary is not applicable to GLM/Nemotron
+    reason: GLM/Nemotron parsers have no Harmony `commentary to=functions.*` stream boundary to split across chunks.
+  REASONING.stream.4.c:
+    description: Partial downstream boundary recovery is not applicable to GLM/Nemotron
+    reason: GLM/Nemotron parsers have no Harmony commentary protocol, so partial commentary-boundary recovery is outside their grammar.
