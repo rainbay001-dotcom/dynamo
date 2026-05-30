@@ -33,7 +33,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     RouteDoc,
-    disconnect::{ConnectionHandle, create_connection_monitor, monitor_for_disconnects},
+    disconnect::{
+        ConnectionHandle, create_connection_monitor, monitor_for_disconnects,
+        monitor_for_disconnects_with_terminal_error,
+    },
     error::HttpError,
     metrics::{
         CancellationLabels, Endpoint, ErrorType, EventConverter,
@@ -1683,7 +1686,7 @@ async fn handler_delete_response(
 
     Ok(Json(serde_json::json!({
         "id": response_id,
-        "object": "response.deleted",
+        "object": "response",
         "deleted": deleted
     }))
     .into_response())
@@ -1877,6 +1880,8 @@ async fn responses(
 
         let saw_error = std::sync::Arc::new(AtomicBool::new(false));
         let saw_error_end = saw_error.clone();
+        let persist_failed = std::sync::Arc::new(AtomicBool::new(false));
+        let persist_failed_end = persist_failed.clone();
 
         let mut http_queue_guard = Some(http_queue_guard);
 
@@ -1911,12 +1916,11 @@ async fn responses(
         let start_stream = stream::iter(start_events);
 
         let done_stream = stream::once(async move {
-            if saw_error_end.load(Ordering::Acquire) {
-                let mut conv = converter_end.lock().expect("converter lock poisoned");
-                return stream::iter(conv.emit_error_events());
-            }
             let (done_events, completed_response) = {
                 let mut conv = converter_end.lock().expect("converter lock poisoned");
+                if saw_error_end.load(Ordering::Acquire) {
+                    return stream::iter(conv.emit_error_events());
+                }
                 (conv.emit_output_done_events(), conv.completed_response())
             };
             let mut events = done_events;
@@ -1931,6 +1935,7 @@ async fn responses(
                 .await
             {
                 tracing::error!(%err, "failed to persist streamed stateful Responses context");
+                persist_failed_end.store(true, Ordering::Release);
                 let mut conv = converter_end.lock().expect("converter lock poisoned");
                 events.extend(conv.emit_failed_event(
                     "server_error",
@@ -1945,11 +1950,20 @@ async fn responses(
         })
         .flatten();
 
+        // Chain: start_events -> chunk_events -> end_events
         let full_stream = start_stream.chain(event_stream).chain(done_stream);
 
         let full_stream = full_stream.map(|result| result.map_err(axum::Error::new));
 
-        let stream = monitor_for_disconnects(full_stream, ctx, inflight_guard, stream_handle);
+        // Wrap with disconnect monitoring: detects client disconnects, cancels generation,
+        // and defers inflight_guard.mark_ok() until the stream completes.
+        let stream = monitor_for_disconnects_with_terminal_error(
+            full_stream,
+            ctx,
+            inflight_guard,
+            stream_handle,
+            Some(persist_failed),
+        );
 
         let mut sse_stream = Sse::new(stream);
         if let Some(keep_alive) = state.sse_keep_alive() {

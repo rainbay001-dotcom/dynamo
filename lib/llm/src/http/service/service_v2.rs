@@ -133,6 +133,9 @@ impl State {
         discovery_client: Arc<dyn Discovery>,
         cancel_token: CancellationToken,
     ) -> anyhow::Result<Self> {
+        let responses_context_store =
+            ResponseContextStoreManager::from_env_with_shutdown(cancel_token.child_token())?;
+
         Ok(Self {
             manager,
             metrics: Arc::new(Metrics::default()),
@@ -149,7 +152,7 @@ impl State {
                 anthropic_endpoints_enabled: AtomicBool::new(false),
             },
             cancel_token,
-            responses_context_store: ResponseContextStoreManager::from_env()?,
+            responses_context_store,
         })
     }
 
