@@ -122,19 +122,18 @@ fn preprocessed_backend_engine(
 {
     let engine: ServiceEngine<_, _> = match router_mode {
         RouterMode::Direct => Arc::new(DirectRoutingRouter::new(router)),
-        RouterMode::Random | RouterMode::RoundRobin => {
-            // Non-KV routing: wrap PushRouter with LoraFilteredRouter for 2-stage routing.
-            // When no LoRAs are registered, the filter is a no-op pass-through.
-            let lora_filter = model_manager
-                .lora_filter()
-                .expect("lora_filter() always returns Some");
-            Arc::new(LoraFilteredRouter::new(
+        RouterMode::Random | RouterMode::RoundRobin => match model_manager.lora_filter() {
+            // LoRA serving enabled: 2-stage routing (filter -> select). With no LoRAs
+            // registered the filter is a transparent pass-through.
+            Some(lora_filter) => Arc::new(LoraFilteredRouter::new(
                 router,
                 lora_filter,
                 model_manager.lora_load_estimator().clone(),
                 router_mode,
-            ))
-        }
+            )),
+            // LoRA serving disabled: unchanged PushRouter path (no regression).
+            None => Arc::new(router),
+        },
         RouterMode::PowerOfTwoChoices
         | RouterMode::LeastLoaded
         | RouterMode::DeviceAwareWeighted => Arc::new(router),
