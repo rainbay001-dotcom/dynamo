@@ -136,7 +136,20 @@ fn preprocessed_backend_engine(
         },
         RouterMode::PowerOfTwoChoices
         | RouterMode::LeastLoaded
-        | RouterMode::DeviceAwareWeighted => Arc::new(router),
+        | RouterMode::DeviceAwareWeighted => {
+            // These advanced non-KV modes are not LoRA-aware (no 2-stage filtering). Warn when
+            // LoRA serving is enabled so the operator knows adapter-specific requests may land
+            // on workers without the adapter; use KV, Random, or RoundRobin for LoRA routing (R3-6).
+            if model_manager.lora_filter().is_some() {
+                tracing::warn!(
+                    ?router_mode,
+                    "LoRA serving is enabled but this router mode does not apply LoRA filtering; \
+                     requests for a specific adapter may route to workers without it. Use KV, \
+                     Random, or RoundRobin for LoRA-aware routing."
+                );
+            }
+            Arc::new(router)
+        }
         RouterMode::KV => {
             let Some(chooser) = chooser else {
                 anyhow::bail!("RouterMode::KV requires KVRouter to not be null");
