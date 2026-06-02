@@ -450,6 +450,12 @@ class LoraMixin:
                                 user_data=user_data,
                                 lora_name=lora_name,
                                 base_model_path=self.config.server_args.model_path,
+                                # Publish the worker's per-worker LoRA slot budget so the frontend
+                                # allocator sizes placement against real capacity instead of the
+                                # hard-coded default.
+                                max_gpu_lora_count=getattr(
+                                    self.config.server_args, "max_loras_per_batch", None
+                                ),
                             )
                             logger.info(
                                 f"Successfully published LoRA '{lora_name}' ModelDeploymentCard"
