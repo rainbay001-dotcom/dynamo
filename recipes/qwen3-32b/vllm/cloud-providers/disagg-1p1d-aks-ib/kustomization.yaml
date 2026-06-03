@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Azure AKS (A100-SXM4-80GB) — HDR InfiniBand via NIXL UCX. AKS schedules RDMA
+# through the Network Operator's *shared* IB device plugin, so the resource key is
+# rdma/shared_ib (not rdma/ib like Nebius/Nscale).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+nameSuffix: -aks-ib
+resources:
+- ../_base
+patches:
+- path: delta.yaml
+  target: { group: nvidia.com, version: v1alpha1, kind: DynamoGraphDeployment }
+- target: { version: v1, kind: Pod }
+  patch: |
+    apiVersion: v1
+    kind: Pod
+    metadata: { name: q32b-1p1d-benchmark }
+    spec:
+      containers:
+      - name: python
+        env:
+        - { name: FRONTEND,     value: q32b-1p1d-aks-ib-frontend }
+        - { name: VARIANT_SLUG, value: aks-ib }

@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Azure AKS delta over ../_base: GPU tolerations, a frontend ephemeral-storage
+# request (the vllm-runtime image is ~30 GB extracted), the rdma/shared_ib
+# resource, /dev/infiniband, and the UCX/NCCL-IB worker env. The model cache is
+# mounted both via the operator service-level mount AND explicitly, because the
+# service-level mount can be overridden once extraPodSpec.volumes is set.
+# (NIXL's default backend is UCX; no explicit kv-transfer backend needed.)
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: q32b-1p1d   # nameSuffix -> q32b-1p1d-aks-ib
+spec:
+  services:
+    Frontend:
+      extraPodSpec:
+        tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      resources:
+        requests:
+          custom:
+            ephemeral-storage: "30Gi"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmPrefillWorker:
+      extraPodSpec:
+        tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        mainContainer:
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1" }
+          - { name: UCX_IB_GPU_DIRECT_RDMA,         value: "yes" }
+          - { name: NCCL_IB_HCA,                    value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+          - { name: NCCL_IB_DISABLE,                value: "0" }
+          - { name: NCCL_SOCKET_IFNAME,             value: "eth0" }
+          - { name: NCCL_DEBUG,                     value: "WARN" }
+          volumeMounts:
+          - { name: ib,                 mountPath: /dev/infiniband }
+          - { name: shared-model-cache, mountPath: /shared-models }
+        volumes:
+        - { name: ib,                 hostPath: { path: /dev/infiniband } }
+        - { name: shared-model-cache, persistentVolumeClaim: { claimName: shared-model-cache } }
+      resources:
+        limits:
+          custom:
+            rdma/shared_ib: "1"
+        requests:
+          custom:
+            rdma/shared_ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmDecodeWorker:
+      extraPodSpec:
+        tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        mainContainer:
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1" }
+          - { name: UCX_IB_GPU_DIRECT_RDMA,         value: "yes" }
+          - { name: NCCL_IB_HCA,                    value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+          - { name: NCCL_IB_DISABLE,                value: "0" }
+          # decode-only: present in the original recipe's decode worker but not prefill.
+          - { name: NCCL_IB_GID_INDEX,              value: "3" }
+          - { name: NCCL_SOCKET_IFNAME,             value: "eth0" }
+          - { name: NCCL_DEBUG,                     value: "WARN" }
+          volumeMounts:
+          - { name: ib,                 mountPath: /dev/infiniband }
+          - { name: shared-model-cache, mountPath: /shared-models }
+        volumes:
+        - { name: ib,                 hostPath: { path: /dev/infiniband } }
+        - { name: shared-model-cache, persistentVolumeClaim: { claimName: shared-model-cache } }
+      resources:
+        limits:
+          custom:
+            rdma/shared_ib: "1"
+        requests:
+          custom:
+            rdma/shared_ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }

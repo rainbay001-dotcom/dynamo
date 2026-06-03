@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# GCP GKE A4X (GB200 NVL72) — RoCEv2 over ConnectX-7 via NIXL UCX. The most
+# divergent variant (GKE Multus RDMA, rack-level anti-affinity, arm64/GB200 node
+# selection, GIB plugin hostPaths, nvcr pull secret).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+nameSuffix: -gke-roce
+resources:
+- ../_base
+patches:
+- path: delta.yaml
+  target: { group: nvidia.com, version: v1alpha1, kind: DynamoGraphDeployment }
+- target: { version: v1, kind: Pod }
+  # GKE customer-cpu nodes are small (~8 CPU / 28 GiB, mostly used by daemonsets);
+  # the HTTP-only bench client requests less than the family default.
+  patch: |
+    apiVersion: v1
+    kind: Pod
+    metadata: { name: q32b-1p1d-benchmark }
+    spec:
+      containers:
+      - name: python
+        env:
+        - { name: FRONTEND,     value: q32b-1p1d-gke-roce-frontend }
+        - { name: VARIANT_SLUG, value: gke-roce }
+        resources:
+          requests: { cpu: "2", memory: 4Gi }
+          limits:   { cpu: "4", memory: 8Gi }

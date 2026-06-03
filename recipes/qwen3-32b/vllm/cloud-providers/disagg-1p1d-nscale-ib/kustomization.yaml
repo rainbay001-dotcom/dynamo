@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nscale managed K8s (B200) — NDR InfiniBand via NIXL UCX.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+nameSuffix: -nscale-ib
+resources:
+- ../_base
+patches:
+- path: delta.yaml
+  target: { group: nvidia.com, version: v1alpha1, kind: DynamoGraphDeployment }
+- target: { version: v1, kind: Pod }
+  patch: |
+    apiVersion: v1
+    kind: Pod
+    metadata: { name: q32b-1p1d-benchmark }
+    spec:
+      containers:
+      - name: python
+        env:
+        - { name: FRONTEND,     value: q32b-1p1d-nscale-ib-frontend }
+        - { name: VARIANT_SLUG, value: nscale-ib }

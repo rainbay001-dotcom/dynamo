@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nebius delta over ../_base: rdma/ib resource, /dev/infiniband + /dev/shm device
+# mounts, and the 8-NIC UCX/IB worker env. The frontend runs as root with an
+# explicit cache mount (its default user can't create /shared-models/hub on a
+# fresh PVC -> empty /v1/models). Workers use the operator service-level mount.
+# (NIXL's default backend is UCX; no explicit kv-transfer backend needed.)
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: q32b-1p1d   # nameSuffix -> q32b-1p1d-nebius-ib
+spec:
+  services:
+    Frontend:
+      extraPodSpec:
+        mainContainer:
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+          - { name: shared-model-cache, mountPath: /shared-models }
+        volumes:
+        - { name: shared-model-cache, persistentVolumeClaim: { claimName: shared-model-cache } }
+    VllmPrefillWorker:
+      extraPodSpec:
+        mainContainer:
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1" }
+          - { name: UCX_IB_GPU_DIRECT_RDMA,         value: "yes" }
+          - { name: NCCL_IB_HCA,                    value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+          - { name: NCCL_IB_DISABLE,                value: "0" }
+          - { name: NCCL_SOCKET_IFNAME,             value: "eth0" }
+          - { name: NCCL_DEBUG,                     value: "WARN" }
+          volumeMounts:
+          - { name: ib,  mountPath: /dev/infiniband }
+          - { name: shm, mountPath: /dev/shm }
+        volumes:
+        - { name: ib,  hostPath: { path: /dev/infiniband } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+      resources:
+        limits:
+          custom:
+            rdma/ib: "1"
+        requests:
+          custom:
+            rdma/ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmDecodeWorker:
+      extraPodSpec:
+        mainContainer:
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1" }
+          - { name: UCX_IB_GPU_DIRECT_RDMA,         value: "yes" }
+          # decode-only: present in the original recipe's decode worker but not prefill.
+          - { name: UCX_RNDV_THRESH,                value: "8192" }
+          - { name: NCCL_IB_HCA,                    value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+          - { name: NCCL_IB_DISABLE,                value: "0" }
+          - { name: NCCL_SOCKET_IFNAME,             value: "eth0" }
+          - { name: NCCL_DEBUG,                     value: "WARN" }
+          volumeMounts:
+          - { name: ib,  mountPath: /dev/infiniband }
+          - { name: shm, mountPath: /dev/shm }
+        volumes:
+        - { name: ib,  hostPath: { path: /dev/infiniband } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+      resources:
+        limits:
+          custom:
+            rdma/ib: "1"
+        requests:
+          custom:
+            rdma/ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }

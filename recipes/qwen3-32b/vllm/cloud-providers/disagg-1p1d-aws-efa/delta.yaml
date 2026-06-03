@@ -1,0 +1,118 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# AWS EFA delta over ../_base. EFA libs ship in the image, so no device hostPath
+# mounts are needed; the model cache uses the operator service-level mount below.
+# NIXL backend selection REQUIRES the kv-transfer-config to carry backends:[LIBFABRIC]
+# — the DYN_KVBM_NIXL_BACKEND_* env alone is not enough (NIXL falls back to UCX).
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: q32b-1p1d   # base name; the overlay's nameSuffix renames it to q32b-1p1d-efa
+spec:
+  services:
+    Frontend:
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1-efa-amd64
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmPrefillWorker:
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1-efa-amd64
+          args:
+          - --model
+          - Qwen/Qwen3-32B
+          - --disaggregation-mode
+          - prefill
+          - --kv-transfer-config
+          - '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+          - --tensor-parallel-size
+          - '4'
+          - --no-enable-log-requests
+          - --gpu-memory-utilization
+          - '0.90'
+          - --async-scheduling
+          - --block-size
+          - '64'
+          - --hf-overrides
+          - '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
+          - --max-model-len
+          - '131072'
+          env:
+          # Base NIXL telemetry + Dynamo/vLLM env, restated (strategic merge replaces
+          # the whole env list on this CRD), then the libfabric/EFA additions.
+          - { name: NIXL_TELEMETRY_ENABLE,           value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,         value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT,  value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,        value: "false" }
+          - { name: HF_HOME,                         value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,              value: "INFO" }
+          - { name: DYN_KVBM_NIXL_BACKEND_LIBFABRIC, value: "true" }
+          - { name: DYN_KVBM_NIXL_BACKEND_UCX,       value: "false" }
+          - { name: FI_PROVIDER,                     value: "efa" }
+          - { name: FI_EFA_USE_DEVICE_RDMA,          value: "1" }
+          - { name: FI_EFA_ENABLE_SHM_TRANSFER,      value: "0" }
+          - { name: FI_LOG_LEVEL,                    value: "warn" }
+          - { name: LD_LIBRARY_PATH,                 value: "/opt/nvidia/nvda_nixl/lib64:/opt/amazon/efa/lib:/opt/amazon/efa/lib64:/usr/local/lib" }
+          - { name: PATH,                            value: "/opt/dynamo/venv/bin:/opt/amazon/efa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }
+          - { name: NCCL_DEBUG,                      value: "WARN" }
+      resources:
+        limits:
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        requests:
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmDecodeWorker:
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1-efa-amd64
+          args:
+          - --model
+          - Qwen/Qwen3-32B
+          - --disaggregation-mode
+          - decode
+          - --kv-transfer-config
+          - '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+          - --tensor-parallel-size
+          - '4'
+          - --no-enable-log-requests
+          - --gpu-memory-utilization
+          - '0.90'
+          - --no-enable-prefix-caching
+          - --async-scheduling
+          - --block-size
+          - '64'
+          - --hf-overrides
+          - '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
+          - --max-model-len
+          - '131072'
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,           value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,         value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT,  value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,        value: "false" }
+          - { name: HF_HOME,                         value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,              value: "INFO" }
+          - { name: DYN_KVBM_NIXL_BACKEND_LIBFABRIC, value: "true" }
+          - { name: DYN_KVBM_NIXL_BACKEND_UCX,       value: "false" }
+          - { name: FI_PROVIDER,                     value: "efa" }
+          - { name: FI_EFA_USE_DEVICE_RDMA,          value: "1" }
+          - { name: FI_EFA_ENABLE_SHM_TRANSFER,      value: "0" }
+          - { name: FI_LOG_LEVEL,                    value: "warn" }
+          - { name: LD_LIBRARY_PATH,                 value: "/opt/nvidia/nvda_nixl/lib64:/opt/amazon/efa/lib:/opt/amazon/efa/lib64:/usr/local/lib" }
+          - { name: PATH,                            value: "/opt/dynamo/venv/bin:/opt/amazon/efa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }
+          - { name: NCCL_DEBUG,                      value: "WARN" }
+      resources:
+        limits:
+          custom:
+            vpc.amazonaws.com/efa: "32"
+        requests:
+          custom:
+            vpc.amazonaws.com/efa: "32"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }

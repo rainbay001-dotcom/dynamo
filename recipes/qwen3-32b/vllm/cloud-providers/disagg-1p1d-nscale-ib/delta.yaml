@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nscale delta over ../_base: rdma/ib resource, /dev/infiniband + /dev/shm device
+# mounts, the GPU toleration, and gpu-memory-utilization 0.70 (B200 headroom).
+# UCX_NET_DEVICES is a deliberately non-contiguous list — compute fabric only; the
+# mlx5_6..9 side fabric must be excluded or transfers hit NIXL_ERR_REMOTE_DISCONNECT.
+# (NIXL's default backend is UCX, so no explicit kv-transfer backend is needed.)
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: q32b-1p1d   # nameSuffix -> q32b-1p1d-nscale-ib
+spec:
+  services:
+    Frontend:
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmPrefillWorker:
+      extraPodSpec:
+        tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        mainContainer:
+          args:
+          - --model
+          - Qwen/Qwen3-32B
+          - --disaggregation-mode
+          - prefill
+          - --kv-transfer-config
+          - '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+          - --tensor-parallel-size
+          - '4'
+          - --no-enable-log-requests
+          - --gpu-memory-utilization
+          - '0.70'
+          - --async-scheduling
+          - --block-size
+          - '64'
+          - --hf-overrides
+          - '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
+          - --max-model-len
+          - '131072'
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_10:1,mlx5_11:1" }
+          - { name: MX_RDMA_NIC_PIN,                value: "auto" }
+          - { name: NIXL_LOG_LEVEL,                 value: "INFO" }
+          volumeMounts:
+          - { name: ib,  mountPath: /dev/infiniband }
+          - { name: shm, mountPath: /dev/shm }
+        volumes:
+        - { name: ib,  hostPath: { path: /dev/infiniband } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+      resources:
+        limits:
+          custom:
+            rdma/ib: "1"
+        requests:
+          custom:
+            rdma/ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
+    VllmDecodeWorker:
+      extraPodSpec:
+        tolerations:
+        - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+        mainContainer:
+          args:
+          - --model
+          - Qwen/Qwen3-32B
+          - --disaggregation-mode
+          - decode
+          - --kv-transfer-config
+          - '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+          - --tensor-parallel-size
+          - '4'
+          - --no-enable-log-requests
+          - --gpu-memory-utilization
+          - '0.70'
+          - --no-enable-prefix-caching
+          - --async-scheduling
+          - --block-size
+          - '64'
+          - --hf-overrides
+          - '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
+          - --max-model-len
+          - '131072'
+          env:
+          - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+          - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+          - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+          - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+          - { name: HF_HOME,                        value: /shared-models }
+          - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+          - { name: UCX_NET_DEVICES,                value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_10:1,mlx5_11:1" }
+          - { name: MX_RDMA_NIC_PIN,                value: "auto" }
+          - { name: NIXL_LOG_LEVEL,                 value: "INFO" }
+          - { name: NCCL_DEBUG,                     value: "WARN" }
+          volumeMounts:
+          - { name: ib,  mountPath: /dev/infiniband }
+          - { name: shm, mountPath: /dev/shm }
+        volumes:
+        - { name: ib,  hostPath: { path: /dev/infiniband } }
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+      resources:
+        limits:
+          custom:
+            rdma/ib: "1"
+        requests:
+          custom:
+            rdma/ib: "1"
+      volumeMounts:
+      - { name: shared-model-cache, mountPoint: /shared-models }
