@@ -121,6 +121,17 @@ def test_openai_stop_sampling_params_maps_token_id_stop_array():
     }
 
 
+@pytest.mark.parametrize("require_reasoning", [True, False])
+def test_reasoning_kwargs_forwards_require_reasoning(require_reasoning):
+    assert BaseWorkerHandler._reasoning_kwargs(
+        {"require_reasoning": require_reasoning}
+    ) == {"require_reasoning": require_reasoning}
+
+
+def test_reasoning_kwargs_omits_absent_field():
+    assert BaseWorkerHandler._reasoning_kwargs({}) == {}
+
+
 def _new_decode_handler(*, use_sglang_tokenizer: bool = False):
     handler = DecodeWorkerHandler.__new__(DecodeWorkerHandler)
     handler.use_sglang_tokenizer = use_sglang_tokenizer
