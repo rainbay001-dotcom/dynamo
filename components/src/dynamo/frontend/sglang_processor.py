@@ -250,6 +250,9 @@ def _build_dynamo_preproc(
     if mm_data:
         preproc["multi_modal_data"] = mm_data
 
+    if request.get("response_format") is not None:
+        preproc["response_format"] = request["response_format"]
+
     return preproc
 
 

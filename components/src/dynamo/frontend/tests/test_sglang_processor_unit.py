@@ -149,6 +149,28 @@ class TestBuildDynamoPreproc:  # FRONTEND.7 — worker subprocess preproc constr
             "json": {"type": "object"}
         }
 
+    def test_response_format_passthrough(self):
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "city_result",
+                "schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        }
+
+        result = _build_dynamo_preproc(
+            {"model": "test", "response_format": response_format},
+            prompt_token_ids=[1, 2, 3],
+            model_name="test",
+            eos_token_id=None,
+        )
+
+        assert result["response_format"] == response_format
+
     def test_stop_conditions_string(self):
         """Single stop string is wrapped in a list."""
         result = _build_dynamo_preproc(

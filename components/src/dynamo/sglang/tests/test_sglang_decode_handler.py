@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from dynamo.sglang.request_handlers.handler_base import BaseWorkerHandler
 from dynamo.sglang.request_handlers.llm.decode_handler import (
     DecodeWorkerHandler,
     _extract_media_urls,
@@ -119,6 +120,24 @@ def test_openai_stop_sampling_params_maps_token_id_stop_array():
     assert _openai_stop_sampling_params({"stop_token_ids": [32, 34]}) == {
         "stop_token_ids": [32, 34]
     }
+
+
+def test_response_format_kwargs_forwards_openai_response_format():
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "city_result",
+            "schema": {"type": "object"},
+        },
+    }
+
+    assert BaseWorkerHandler._response_format_kwargs(
+        {"response_format": response_format}
+    ) == {"response_format": response_format}
+
+
+def test_response_format_kwargs_omits_absent_field():
+    assert BaseWorkerHandler._response_format_kwargs({}) == {}
 
 
 def _new_decode_handler(*, use_sglang_tokenizer: bool = False):
