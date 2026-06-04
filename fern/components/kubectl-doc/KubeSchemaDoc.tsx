@@ -102,6 +102,7 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
   function focusLine(line?: KubeSchemaLine) {
     if (line?.detailId) {
       setFocusedId(line.detailId);
+      setHasFocus(true);
       rootRef.current?.focus({ preventScroll: true });
     }
   }
@@ -184,7 +185,7 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
   return (
     <div
       ref={rootRef}
-      className="kdoc-fern kdoc-fern-wrap"
+      className={`kdoc-fern kdoc-fern-wrap${hasFocus && focusedField ? " kdoc-fern-has-details" : ""}`}
       tabIndex={0}
       onFocusCapture={() => setHasFocus(true)}
       onBlurCapture={onBlur}
@@ -361,7 +362,7 @@ function initialExpanded(lines: KubeSchemaLine[]) {
   const expanded: Record<number, boolean> = {};
   for (const line of lines) {
     if (line.foldable) {
-      expanded[line.index] = !line.collapsed;
+      expanded[line.index] = !initiallyCollapsed(line);
     }
   }
   return expanded;
@@ -371,7 +372,11 @@ function lineExpanded(line: KubeSchemaLine, expanded: Record<number, boolean>) {
   if (!line.foldable) {
     return true;
   }
-  return expanded[line.index] ?? !line.collapsed;
+  return expanded[line.index] ?? !initiallyCollapsed(line);
+}
+
+function initiallyCollapsed(line: KubeSchemaLine) {
+  return Boolean(line.collapsed || line.path === "metadata" || line.path === "status" || line.depth >= 3);
 }
 
 function isFocusableLine(line: KubeSchemaLine) {
@@ -683,7 +688,7 @@ const styles = `
 .kdoc-fern-filter{background:#fff7cc;border:1px solid #f0d35b;border-radius:6px;color:#7a4b00;font:12px/1.25 ui-monospace,SFMono-Regular,SFMono,Consolas,"Liberation Mono",Menlo,monospace;padding:4px 7px}
 .kdoc-fern-hint{color:var(--kdoc-muted);font-size:12px}
 .kdoc-fern-layout{display:block;position:relative}
-.kdoc-fern-tree{background:var(--kdoc-panel);border:1px solid var(--kdoc-border);border-radius:8px;max-height:70vh;overflow:auto;padding:10px 0}
+.kdoc-fern-tree{background:var(--kdoc-panel);border:1px solid var(--kdoc-border);border-radius:8px;max-height:min(72vh,760px);overflow:auto;padding:10px 0}
 .kdoc-fern-line{align-items:flex-start;display:flex;font:13px/1.3 ui-monospace,SFMono-Regular,SFMono,Consolas,"Liberation Mono",Menlo,monospace;min-height:1.3em;padding:0 12px;white-space:pre}
 .kdoc-fern-fold,.kdoc-fern-gutter{background:transparent;border:0;color:var(--kdoc-muted);display:block;flex:0 0 24px;font:inherit;height:1.3em;line-height:inherit;margin:0;padding:0;text-align:left;user-select:none}
 .kdoc-fern-fold{cursor:pointer}
@@ -719,7 +724,7 @@ const styles = `
 .kdoc-fern-detail-section h3{color:var(--kdoc-muted);font-size:11px;letter-spacing:.02em;margin:0 0 6px;text-transform:uppercase}
 .kdoc-fern-detail-section p{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .kdoc-fern-detail-section ul{display:grid;gap:4px;margin:0;padding-left:18px}
-@media(min-width:1200px){.kdoc-fern-layout{align-items:start;display:grid}.kdoc-fern-tree{grid-area:1/1}.kdoc-fern-details{grid-area:1/1;justify-self:end;margin-top:0;max-height:calc(100vh - var(--header-height,72px) - 2rem);top:calc(var(--header-height,72px) + 1rem);transform:translateX(calc(100% + 1.5rem));width:clamp(260px,22vw,360px)}}
+@media(min-width:1200px){.kdoc-fern-layout{align-items:start;display:grid}.kdoc-fern-tree{grid-area:1/1}.kdoc-fern-has-details .kdoc-fern-tree{padding-right:clamp(300px,24vw,390px)}.kdoc-fern-details{grid-area:1/1;justify-self:end;margin:12px 12px 0 0;max-height:min(62vh,720px);top:calc(var(--header-height,72px) + 1rem);width:clamp(260px,22vw,360px)}}
 @media(max-width:900px){.kdoc-fern-details{max-height:50vh}.kdoc-fern-hint{display:none}}
 `;
 
