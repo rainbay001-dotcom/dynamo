@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 
 type KubeSchemaLine = {
   index: number;
@@ -36,8 +36,6 @@ type KubeSchemaDocument = {
   resource?: string;
   lines: KubeSchemaLine[];
   fields: KubeSchemaField[];
-  truncated?: boolean;
-  truncationDepth?: number;
 };
 
 type KubeSchemaDocProps = {
@@ -50,7 +48,7 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>(() => initialExpanded(data.lines));
   const [focusedId, setFocusedId] = useState(() => firstFocusableLine(data.lines)?.detailId ?? "");
   const [filter, setFilter] = useState("");
-  const [wrap, setWrap] = useState(true);
+  const [hasFocus, setHasFocus] = useState(false);
 
   useEffect(() => {
     setExpanded(initialExpanded(data.lines));
@@ -104,6 +102,14 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
   function focusLine(line?: KubeSchemaLine) {
     if (line?.detailId) {
       setFocusedId(line.detailId);
+      rootRef.current?.focus({ preventScroll: true });
+    }
+  }
+
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (!nextTarget || !(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+      setHasFocus(false);
     }
   }
 
@@ -178,17 +184,17 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
   return (
     <div
       ref={rootRef}
-      className={`kdoc-fern${wrap ? " kdoc-fern-wrap" : ""}`}
+      className="kdoc-fern kdoc-fern-wrap"
       tabIndex={0}
+      onFocusCapture={() => setHasFocus(true)}
+      onBlurCapture={onBlur}
       onKeyDown={onKeyDown}
       aria-label={`${data.kind} schema`}
     >
       <style>{styles}</style>
       <div className="kdoc-fern-toolbar">
         {filtering && filter ? <div className="kdoc-fern-filter">filter: {filter}</div> : <div />}
-        <span className="kdoc-fern-hint">
-          {data.truncated ? `schema preview truncated at depth ${data.truncationDepth ?? "?"}` : "up/down focus, left/right fold, enter toggle, type to filter"}
-        </span>
+        <span className="kdoc-fern-hint">up/down focus, left/right fold, enter toggle, type to filter</span>
       </div>
       <div className="kdoc-fern-layout">
         <section className="kdoc-fern-tree" role="tree" aria-label={`${data.kind} YAML schema`}>
@@ -204,17 +210,12 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
             />
           ))}
         </section>
-        <aside className="kdoc-fern-details" aria-live="polite">
-          <h2>Details</h2>
-          {focusedField ? <FieldDetails field={focusedField} /> : <p className="kdoc-fern-empty">Select a field.</p>}
-        </aside>
-      </div>
-      <div className="kdoc-fern-controls">
-        <label className="kdoc-fern-wrap-toggle">
-          <input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} />
-          <span className="kdoc-fern-switch" aria-hidden="true" />
-          <span>wrap</span>
-        </label>
+        {hasFocus && focusedField ? (
+          <aside className="kdoc-fern-details" aria-live="polite">
+            <h2>Details</h2>
+            <FieldDetails field={focusedField} />
+          </aside>
+        ) : null}
       </div>
     </div>
   );
@@ -681,7 +682,7 @@ const styles = `
 .kdoc-fern-toolbar{align-items:center;display:flex;gap:.75rem;justify-content:space-between;margin:0 0 .6rem;min-height:1.8rem}
 .kdoc-fern-filter{background:#fff7cc;border:1px solid #f0d35b;border-radius:6px;color:#7a4b00;font:12px/1.25 ui-monospace,SFMono-Regular,SFMono,Consolas,"Liberation Mono",Menlo,monospace;padding:4px 7px}
 .kdoc-fern-hint{color:var(--kdoc-muted);font-size:12px}
-.kdoc-fern-layout{align-items:start;display:grid;gap:1rem;grid-template-columns:minmax(0,1fr) minmax(220px,30%)}
+.kdoc-fern-layout{display:block;position:relative}
 .kdoc-fern-tree{background:var(--kdoc-panel);border:1px solid var(--kdoc-border);border-radius:8px;max-height:70vh;overflow:auto;padding:10px 0}
 .kdoc-fern-line{align-items:flex-start;display:flex;font:13px/1.3 ui-monospace,SFMono-Regular,SFMono,Consolas,"Liberation Mono",Menlo,monospace;min-height:1.3em;padding:0 12px;white-space:pre}
 .kdoc-fern-fold,.kdoc-fern-gutter{background:transparent;border:0;color:var(--kdoc-muted);display:block;flex:0 0 24px;font:inherit;height:1.3em;line-height:inherit;margin:0;padding:0;text-align:left;user-select:none}
@@ -702,7 +703,7 @@ const styles = `
 .kdoc-fern-required-label{background:#ffebe9;border:1px solid #ff8182;border-radius:999px;color:var(--kdoc-required);display:inline-block;font-weight:700;line-height:1.1;padding:0 .35em;vertical-align:baseline}
 .kdoc-fern-filter-hit{background:var(--kdoc-filter);border-radius:2px;color:#111;font-weight:700;padding:0 .08em}
 .kdoc-fern-selected .kdoc-fern-yaml{background:var(--kdoc-selected)}
-.kdoc-fern-details{align-self:start;background:#fff;border:1px solid var(--kdoc-border);border-radius:8px;font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:70vh;min-width:0;overflow:auto;padding:12px;position:sticky;scrollbar-gutter:stable;top:12px}
+.kdoc-fern-details{background:#fff;border:1px solid var(--kdoc-border);border-radius:8px;box-shadow:0 8px 28px rgba(31,41,51,.14);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:50vh;min-width:0;overflow:auto;padding:12px;position:sticky;scrollbar-gutter:stable;top:calc(var(--header-height,72px) + 1rem);z-index:5}
 .kdoc-fern-details h2{font-size:16px;line-height:1.25;margin:0 0 10px}
 .kdoc-fern-empty{color:var(--kdoc-muted);margin:0}
 .kdoc-fern-detail-body{display:grid;gap:12px}
@@ -718,14 +719,8 @@ const styles = `
 .kdoc-fern-detail-section h3{color:var(--kdoc-muted);font-size:11px;letter-spacing:.02em;margin:0 0 6px;text-transform:uppercase}
 .kdoc-fern-detail-section p{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .kdoc-fern-detail-section ul{display:grid;gap:4px;margin:0;padding-left:18px}
-.kdoc-fern-controls{bottom:calc(12px + 2.5em);display:flex;height:0;justify-content:flex-end;pointer-events:none;position:sticky;z-index:4}
-.kdoc-fern-wrap-toggle{align-items:center;background:transparent;border:0;color:var(--kdoc-muted);cursor:pointer;display:flex;font-size:12px;font-weight:600;gap:.65em;line-height:1;padding:0;pointer-events:auto}
-.kdoc-fern-wrap-toggle input{block-size:1px;clip:rect(0 0 0 0);clip-path:inset(50%);inline-size:1px;margin:0;overflow:hidden;position:absolute;white-space:nowrap}
-.kdoc-fern-switch{background:#d0d7de;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(31,41,51,.08);display:inline-block;flex:0 0 auto;inline-size:2.65em;block-size:1.5em;position:relative;transition:background-color .16s ease,box-shadow .16s ease}
-.kdoc-fern-switch::after{background:#fff;border-radius:50%;box-shadow:0 .08em .24em rgba(31,41,51,.28);content:"";display:block;inline-size:1.18em;block-size:1.18em;position:absolute;inset-block-start:50%;inset-inline-start:.16em;transform:translateY(-50%);transition:inset-inline-start .16s ease}
-.kdoc-fern-wrap-toggle input:checked + .kdoc-fern-switch{background:#34c759;box-shadow:inset 0 0 0 1px rgba(17,99,41,.12)}
-.kdoc-fern-wrap-toggle input:checked + .kdoc-fern-switch::after{inset-inline-start:1.31em}
-@media(max-width:900px){.kdoc-fern-layout{grid-template-columns:1fr}.kdoc-fern-details{max-height:50vh}.kdoc-fern-hint{display:none}}
+@media(min-width:1200px){.kdoc-fern-details{bottom:1rem;max-height:calc(100vh - var(--header-height,72px) - 2rem);position:fixed;right:1rem;top:calc(var(--header-height,72px) + 1rem);width:clamp(260px,22vw,360px)}}
+@media(max-width:900px){.kdoc-fern-details{max-height:50vh}.kdoc-fern-hint{display:none}}
 `;
 
 export default KubeSchemaDoc;

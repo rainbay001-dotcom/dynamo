@@ -19,7 +19,7 @@ const kubectlDocSchemas = [
         "path": "apiVersion",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-apiversion"
+        "detailId": "field-nvidia-com-v1alpha1-apiversion",
       },
       {
         "index": 1,
@@ -30,7 +30,7 @@ const kubectlDocSchemas = [
         "path": "kind",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-kind"
+        "detailId": "field-nvidia-com-v1alpha1-kind",
       },
       {
         "index": 2,
@@ -42,7 +42,7 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata"
+        "detailId": "field-nvidia-com-v1alpha1-metadata",
       },
       {
         "index": 3,
@@ -55,14 +55,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 4,
-        "text": "  name: \"<string>\" # required",
+        "text": "  name: \"\u003cstring\u003e\" # required",
         "description": "Name must be unique within a namespace.",
         "depth": 1,
         "field": "name",
         "path": "metadata.name",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-name"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-name",
       },
       {
         "index": 5,
@@ -81,14 +81,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 7,
-        "text": "  namespace: \"<string>\" # required",
+        "text": "  namespace: \"\u003cstring\u003e\" # required",
         "description": "Namespace defines the space within which each name must be unique.",
         "depth": 1,
         "field": "namespace",
         "path": "metadata.namespace",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-namespace"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-namespace",
       },
       {
         "index": 8,
@@ -114,16 +114,16 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-annotations"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-annotations",
       },
       {
         "index": 11,
-        "text": "    # <key>: \"<string>\"",
+        "text": "    # \u003ckey\u003e: \"\u003cstring\u003e\"",
         "depth": 2,
-        "field": "<key>",
-        "path": "metadata.annotations.<key>",
+        "field": "\u003ckey\u003e",
+        "path": "metadata.annotations.\u003ckey\u003e",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-annotations-key"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-annotations-key",
       },
       {
         "index": 12,
@@ -141,13 +141,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 14,
-        "text": "  # creationTimestamp: \"<string>\"",
+        "text": "  # creationTimestamp: \"\u003cstring\u003e\"",
         "description": "CreationTimestamp is set by the server when a resource is created.",
         "depth": 1,
         "field": "creationTimestamp",
         "path": "metadata.creationTimestamp",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-creationtimestamp"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-creationtimestamp",
       },
       {
         "index": 15,
@@ -165,13 +165,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 17,
-        "text": "  # deletionGracePeriodSeconds: <int64>",
+        "text": "  # deletionGracePeriodSeconds: \u003cint64\u003e",
         "description": "Number of seconds allowed for graceful deletion.",
         "depth": 1,
         "field": "deletionGracePeriodSeconds",
         "path": "metadata.deletionGracePeriodSeconds",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-deletiongraceperiodseconds"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-deletiongraceperiodseconds",
       },
       {
         "index": 18,
@@ -189,13 +189,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 20,
-        "text": "  # deletionTimestamp: \"<string>\"",
+        "text": "  # deletionTimestamp: \"\u003cstring\u003e\"",
         "description": "DeletionTimestamp is set by the server when graceful deletion is requested.",
         "depth": 1,
         "field": "deletionTimestamp",
         "path": "metadata.deletionTimestamp",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-deletiontimestamp"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-deletiontimestamp",
       },
       {
         "index": 21,
@@ -221,11 +221,11 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-finalizers"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-finalizers",
       },
       {
         "index": 24,
-        "text": "    # - \"<string>\"",
+        "text": "    # - \"\u003cstring\u003e\"",
         "depth": 3,
         "path": "metadata.finalizers[]",
         "code": true,
@@ -256,13 +256,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 28,
-        "text": "  # generateName: \"<string>\"",
+        "text": "  # generateName: \"\u003cstring\u003e\"",
         "description": "GenerateName is an optional prefix used by the server to generate a unique name.",
         "depth": 1,
         "field": "generateName",
         "path": "metadata.generateName",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-generatename"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-generatename",
       },
       {
         "index": 29,
@@ -280,13 +280,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 31,
-        "text": "  # generation: <int64>",
+        "text": "  # generation: \u003cint64\u003e",
         "description": "Generation is a sequence number representing a specific desired state.",
         "depth": 1,
         "field": "generation",
         "path": "metadata.generation",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-generation"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-generation",
       },
       {
         "index": 32,
@@ -312,16 +312,16 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-labels"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-labels",
       },
       {
         "index": 35,
-        "text": "    # <key>: \"<string>\"",
+        "text": "    # \u003ckey\u003e: \"\u003cstring\u003e\"",
         "depth": 2,
-        "field": "<key>",
-        "path": "metadata.labels.<key>",
+        "field": "\u003ckey\u003e",
+        "path": "metadata.labels.\u003ckey\u003e",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-labels-key"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-labels-key",
       },
       {
         "index": 36,
@@ -347,7 +347,7 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields",
       },
       {
         "index": 39,
@@ -359,13 +359,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 40,
-        "text": "      # apiVersion: \"<string>\"",
+        "text": "      # apiVersion: \"\u003cstring\u003e\"",
         "description": "APIVersion defines the version of this field set.",
         "depth": 3,
         "field": "apiVersion",
         "path": "metadata.managedFields[].apiVersion",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-apiversion"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-apiversion",
       },
       {
         "index": 41,
@@ -383,13 +383,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 43,
-        "text": "      # fieldsType: \"<string>\"",
+        "text": "      # fieldsType: \"\u003cstring\u003e\"",
         "description": "FieldsType is the discriminator for the fields format.",
         "depth": 3,
         "field": "fieldsType",
         "path": "metadata.managedFields[].fieldsType",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-fieldstype"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-fieldstype",
       },
       {
         "index": 44,
@@ -413,7 +413,7 @@ const kubectlDocSchemas = [
         "field": "fieldsV1",
         "path": "metadata.managedFields[].fieldsV1",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-fieldsv1"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-fieldsv1",
       },
       {
         "index": 47,
@@ -431,13 +431,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 49,
-        "text": "      # manager: \"<string>\"",
+        "text": "      # manager: \"\u003cstring\u003e\"",
         "description": "Manager identifies the workflow managing these fields.",
         "depth": 3,
         "field": "manager",
         "path": "metadata.managedFields[].manager",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-manager"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-manager",
       },
       {
         "index": 50,
@@ -463,13 +463,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 53,
-        "text": "      # operation: \"<string>\"",
+        "text": "      # operation: \"\u003cstring\u003e\"",
         "description": "Operation is the type of operation that produced this managedFields entry.",
         "depth": 3,
         "field": "operation",
         "path": "metadata.managedFields[].operation",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-operation"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-operation",
       },
       {
         "index": 54,
@@ -487,13 +487,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 56,
-        "text": "      # subresource: \"<string>\"",
+        "text": "      # subresource: \"\u003cstring\u003e\"",
         "description": "Subresource is the name of the subresource used to update the object.",
         "depth": 3,
         "field": "subresource",
         "path": "metadata.managedFields[].subresource",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-subresource"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-subresource",
       },
       {
         "index": 57,
@@ -511,13 +511,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 59,
-        "text": "      # time: \"<string>\"",
+        "text": "      # time: \"\u003cstring\u003e\"",
         "description": "Time is when this managedFields entry was added.",
         "depth": 3,
         "field": "time",
         "path": "metadata.managedFields[].time",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-time"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-managedfields-time",
       },
       {
         "index": 60,
@@ -543,7 +543,7 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences",
       },
       {
         "index": 63,
@@ -556,14 +556,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 64,
-        "text": "      apiVersion: \"<string>\" # required",
+        "text": "      apiVersion: \"\u003cstring\u003e\" # required",
         "description": "API version of the referent.",
         "depth": 3,
         "field": "apiVersion",
         "path": "metadata.ownerReferences[].apiVersion",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-apiversion"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-apiversion",
       },
       {
         "index": 65,
@@ -582,14 +582,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 67,
-        "text": "      kind: \"<string>\" # required",
+        "text": "      kind: \"\u003cstring\u003e\" # required",
         "description": "Kind of the referent.",
         "depth": 3,
         "field": "kind",
         "path": "metadata.ownerReferences[].kind",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-kind"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-kind",
       },
       {
         "index": 68,
@@ -608,14 +608,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 70,
-        "text": "      name: \"<string>\" # required",
+        "text": "      name: \"\u003cstring\u003e\" # required",
         "description": "Name of the referent.",
         "depth": 3,
         "field": "name",
         "path": "metadata.ownerReferences[].name",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-name"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-name",
       },
       {
         "index": 71,
@@ -634,14 +634,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 73,
-        "text": "      uid: \"<string>\" # required",
+        "text": "      uid: \"\u003cstring\u003e\" # required",
         "description": "UID of the referent.",
         "depth": 3,
         "field": "uid",
         "path": "metadata.ownerReferences[].uid",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-uid"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-uid",
       },
       {
         "index": 74,
@@ -659,13 +659,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 76,
-        "text": "      # blockOwnerDeletion: <boolean>",
+        "text": "      # blockOwnerDeletion: \u003cboolean\u003e",
         "description": "BlockOwnerDeletion controls foreground deletion behavior.",
         "depth": 3,
         "field": "blockOwnerDeletion",
         "path": "metadata.ownerReferences[].blockOwnerDeletion",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-blockownerdeletion"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-blockownerdeletion",
       },
       {
         "index": 77,
@@ -683,13 +683,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 79,
-        "text": "      # controller: <boolean>",
+        "text": "      # controller: \u003cboolean\u003e",
         "description": "Controller marks the managing controller owner reference.",
         "depth": 3,
         "field": "controller",
         "path": "metadata.ownerReferences[].controller",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-controller"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-ownerreferences-controller",
       },
       {
         "index": 80,
@@ -707,13 +707,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 82,
-        "text": "  # resourceVersion: \"<string>\"",
+        "text": "  # resourceVersion: \"\u003cstring\u003e\"",
         "description": "ResourceVersion is an opaque internal version value.",
         "depth": 1,
         "field": "resourceVersion",
         "path": "metadata.resourceVersion",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-resourceversion"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-resourceversion",
       },
       {
         "index": 83,
@@ -731,13 +731,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 85,
-        "text": "  # selfLink: \"<string>\"",
+        "text": "  # selfLink: \"\u003cstring\u003e\"",
         "description": "SelfLink is a deprecated read-only field.",
         "depth": 1,
         "field": "selfLink",
         "path": "metadata.selfLink",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-selflink"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-selflink",
       },
       {
         "index": 86,
@@ -755,13 +755,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 88,
-        "text": "  # uid: \"<string>\"",
+        "text": "  # uid: \"\u003cstring\u003e\"",
         "description": "UID is the unique in time and space value for this object.",
         "depth": 1,
         "field": "uid",
         "path": "metadata.uid",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-metadata-uid"
+        "detailId": "field-nvidia-com-v1alpha1-metadata-uid",
       },
       {
         "index": 89,
@@ -780,7 +780,7 @@ const kubectlDocSchemas = [
         "path": "spec",
         "code": true,
         "foldable": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec"
+        "detailId": "field-nvidia-com-v1alpha1-spec",
       },
       {
         "index": 91,
@@ -802,14 +802,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 93,
-        "text": "  baseModelName: \"<string>\" # required",
+        "text": "  baseModelName: \"\u003cstring\u003e\" # required",
         "description": "BaseModelName is the base model identifier that matches the service label\nThis is used to discover endpoints via headless services",
         "depth": 1,
         "field": "baseModelName",
         "path": "spec.baseModelName",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec-basemodelname"
+        "detailId": "field-nvidia-com-v1alpha1-spec-basemodelname",
       },
       {
         "index": 94,
@@ -837,14 +837,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 97,
-        "text": "  modelName: \"<string>\" # required",
+        "text": "  modelName: \"\u003cstring\u003e\" # required",
         "description": "ModelName is the full model identifier (e.g., \"meta-llama/Llama-3.3-70B-Instruct-lora\")",
         "depth": 1,
         "field": "modelName",
         "path": "spec.modelName",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec-modelname"
+        "detailId": "field-nvidia-com-v1alpha1-spec-modelname",
       },
       {
         "index": 98,
@@ -868,7 +868,7 @@ const kubectlDocSchemas = [
         "field": "modelType",
         "path": "spec.modelType",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec-modeltype"
+        "detailId": "field-nvidia-com-v1alpha1-spec-modeltype",
       },
       {
         "index": 101,
@@ -901,7 +901,7 @@ const kubectlDocSchemas = [
         "path": "spec.source",
         "code": true,
         "foldable": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec-source"
+        "detailId": "field-nvidia-com-v1alpha1-spec-source",
       },
       {
         "index": 105,
@@ -923,14 +923,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 107,
-        "text": "    uri: \"<string>\" # required",
+        "text": "    uri: \"\u003cstring\u003e\" # required",
         "description": "URI is the model source URI\nSupported formats:\n- S3: s3://bucket/path/to/model\n- HuggingFace: hf://org/model@revision_sha",
         "depth": 2,
         "field": "uri",
         "path": "spec.source.uri",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-spec-source-uri"
+        "detailId": "field-nvidia-com-v1alpha1-spec-source-uri",
       },
       {
         "index": 108,
@@ -956,7 +956,7 @@ const kubectlDocSchemas = [
         "code": true,
         "foldable": true,
         "collapsed": true,
-        "detailId": "field-nvidia-com-v1alpha1-status"
+        "detailId": "field-nvidia-com-v1alpha1-status",
       },
       {
         "index": 111,
@@ -969,14 +969,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 112,
-        "text": "  readyEndpoints: <integer> # required",
+        "text": "  readyEndpoints: \u003cinteger\u003e # required",
         "description": "ReadyEndpoints is the count of endpoints that are ready",
         "depth": 1,
         "field": "readyEndpoints",
         "path": "status.readyEndpoints",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-readyendpoints"
+        "detailId": "field-nvidia-com-v1alpha1-status-readyendpoints",
       },
       {
         "index": 113,
@@ -995,14 +995,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 115,
-        "text": "  totalEndpoints: <integer> # required",
+        "text": "  totalEndpoints: \u003cinteger\u003e # required",
         "description": "TotalEndpoints is the total count of endpoints",
         "depth": 1,
         "field": "totalEndpoints",
         "path": "status.totalEndpoints",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-totalendpoints"
+        "detailId": "field-nvidia-com-v1alpha1-status-totalendpoints",
       },
       {
         "index": 116,
@@ -1027,7 +1027,7 @@ const kubectlDocSchemas = [
         "path": "status.conditions",
         "code": true,
         "foldable": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions",
       },
       {
         "index": 119,
@@ -1067,14 +1067,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 123,
-        "text": "      lastTransitionTime: \"<string>\" # required",
+        "text": "      lastTransitionTime: \"\u003cstring\u003e\" # required",
         "description": "lastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
         "depth": 3,
         "field": "lastTransitionTime",
         "path": "status.conditions[].lastTransitionTime",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-lasttransitiontime"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-lasttransitiontime",
       },
       {
         "index": 124,
@@ -1102,14 +1102,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 127,
-        "text": "      message: \"<string>\" # required, maxLength: 32768",
+        "text": "      message: \"\u003cstring\u003e\" # required, maxLength: 32768",
         "description": "message is a human readable message indicating details about the transition.\nThis may be an empty string.",
         "depth": 3,
         "field": "message",
         "path": "status.conditions[].message",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-message"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-message",
       },
       {
         "index": 128,
@@ -1164,14 +1164,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 134,
-        "text": "      reason: \"<string>\" # required, minLength: 1, maxLength: 1024",
+        "text": "      reason: \"\u003cstring\u003e\" # required, minLength: 1, maxLength: 1024",
         "description": "reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.\nThis field may not be empty.",
         "depth": 3,
         "field": "reason",
         "path": "status.conditions[].reason",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-reason"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-reason",
       },
       {
         "index": 135,
@@ -1197,7 +1197,7 @@ const kubectlDocSchemas = [
         "path": "status.conditions[].status",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-status"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-status",
       },
       {
         "index": 138,
@@ -1216,14 +1216,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 140,
-        "text": "      type: \"<string>\" # required, maxLength: 316",
+        "text": "      type: \"\u003cstring\u003e\" # required, maxLength: 316",
         "description": "type of condition in CamelCase or in foo.example.com/CamelCase.",
         "depth": 3,
         "field": "type",
         "path": "status.conditions[].type",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-type"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-type",
       },
       {
         "index": 141,
@@ -1273,13 +1273,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 147,
-        "text": "      # observedGeneration: <int64> # minimum: 0",
+        "text": "      # observedGeneration: \u003cint64\u003e # minimum: 0",
         "description": "observedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date\nwith respect to the current state of the instance.",
         "depth": 3,
         "field": "observedGeneration",
         "path": "status.conditions[].observedGeneration",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-conditions-observedgeneration"
+        "detailId": "field-nvidia-com-v1alpha1-status-conditions-observedgeneration",
       },
       {
         "index": 148,
@@ -1304,7 +1304,7 @@ const kubectlDocSchemas = [
         "path": "status.endpoints",
         "code": true,
         "foldable": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-endpoints"
+        "detailId": "field-nvidia-com-v1alpha1-status-endpoints",
       },
       {
         "index": 151,
@@ -1326,14 +1326,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 153,
-        "text": "      address: \"<string>\" # required",
+        "text": "      address: \"\u003cstring\u003e\" # required",
         "description": "Address is the full address of the endpoint (e.g., \"http://10.0.1.5:9090\")",
         "depth": 3,
         "field": "address",
         "path": "status.endpoints[].address",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-address"
+        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-address",
       },
       {
         "index": 154,
@@ -1370,14 +1370,14 @@ const kubectlDocSchemas = [
       },
       {
         "index": 158,
-        "text": "      ready: <boolean> # required",
+        "text": "      ready: \u003cboolean\u003e # required",
         "description": "Ready indicates whether the endpoint is ready to serve traffic\nFor LoRA models: true if the POST /loras request succeeded with a 2xx status code\nFor base models: always false (no probing performed)",
         "depth": 3,
         "field": "ready",
         "path": "status.endpoints[].ready",
         "code": true,
         "required": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-ready"
+        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-ready",
       },
       {
         "index": 159,
@@ -1395,13 +1395,13 @@ const kubectlDocSchemas = [
       },
       {
         "index": 161,
-        "text": "      # podName: \"<string>\"",
+        "text": "      # podName: \"\u003cstring\u003e\"",
         "description": "PodName is the name of the pod serving this endpoint",
         "depth": 3,
         "field": "podName",
         "path": "status.endpoints[].podName",
         "code": true,
-        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-podname"
+        "detailId": "field-nvidia-com-v1alpha1-status-endpoints-podname",
       }
     ],
     "fields": [
@@ -1438,7 +1438,7 @@ const kubectlDocSchemas = [
       },
       {
         "id": "field-nvidia-com-v1alpha1-metadata-annotations-key",
-        "path": "metadata.annotations.<key>",
+        "path": "metadata.annotations.\u003ckey\u003e",
         "type": "string",
         "required": false
       },
@@ -1475,7 +1475,7 @@ const kubectlDocSchemas = [
       {
         "id": "field-nvidia-com-v1alpha1-metadata-finalizers",
         "path": "metadata.finalizers",
-        "type": "array<string>",
+        "type": "array\u003cstring\u003e",
         "required": false,
         "description": "Finalizers must be empty before the object is deleted from the registry."
       },
@@ -1511,14 +1511,14 @@ const kubectlDocSchemas = [
       },
       {
         "id": "field-nvidia-com-v1alpha1-metadata-labels-key",
-        "path": "metadata.labels.<key>",
+        "path": "metadata.labels.\u003ckey\u003e",
         "type": "string",
         "required": false
       },
       {
         "id": "field-nvidia-com-v1alpha1-metadata-managedfields",
         "path": "metadata.managedFields",
-        "type": "array<object>",
+        "type": "array\u003cobject\u003e",
         "required": false,
         "description": "ManagedFields records which actor manages which fields."
       },
@@ -1594,7 +1594,7 @@ const kubectlDocSchemas = [
       {
         "id": "field-nvidia-com-v1alpha1-metadata-ownerreferences",
         "path": "metadata.ownerReferences",
-        "type": "array<object>",
+        "type": "array\u003cobject\u003e",
         "required": false,
         "description": "OwnerReferences lists objects depended on by this object."
       },
@@ -1726,7 +1726,7 @@ const kubectlDocSchemas = [
       {
         "id": "field-nvidia-com-v1alpha1-status-conditions",
         "path": "status.conditions",
-        "type": "array<object>",
+        "type": "array\u003cobject\u003e",
         "required": false,
         "description": "Conditions represents the latest available observations of the model's state"
       },
@@ -1797,7 +1797,7 @@ const kubectlDocSchemas = [
       {
         "id": "field-nvidia-com-v1alpha1-status-endpoints",
         "path": "status.endpoints",
-        "type": "array<object>",
+        "type": "array\u003cobject\u003e",
         "required": false,
         "description": "Endpoints is the current list of all endpoints for this model"
       },
