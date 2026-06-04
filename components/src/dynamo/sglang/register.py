@@ -58,6 +58,7 @@ async def _register_model_with_runtime_config(
     output_type: ModelType = ModelType.Chat | ModelType.Completions,
     worker_type: Optional[WorkerType] = None,
     needs: Optional[List[List[WorkerType]]] = None,
+    serves_lora_load: bool = False,
 ) -> bool:
     """Register LLM with the Dynamo runtime.
 
@@ -100,16 +101,19 @@ async def _register_model_with_runtime_config(
 
     # Advertise the worker's LoRA slot budget on the BASE registration so the frontend allocator
     # can place adapters onto idle-but-LoRA-capable workers before any adapter is loaded here.
-    # Only generative LLM workers (decode/prefill) serve the LoRA load endpoints (init_llm.py);
-    # embedding workers register through this same path but do not, so they must not advertise
-    # capacity they cannot fulfill. Gated on LoRA being enabled AND a generative output type.
+    # Only workers that actually SERVE the LoRA load endpoints (init_decode / init_prefill, which
+    # pass serves_lora_load=True) may advertise capacity. Other worker modes (embedding, diffusion,
+    # multimodal-encode) register through this same wrapper but do not serve load_lora, so they
+    # must never advertise capacity they cannot fulfill -- hence an explicit allowlist flag rather
+    # than an output_type denylist.
     lora_enabled = bool(
         getattr(server_args, "enable_lora", None)
         or getattr(server_args, "lora_paths", None)
     )
-    lora_load_capable = lora_enabled and output_type != ModelType.Embedding
     max_gpu_lora_count = (
-        getattr(server_args, "max_loras_per_batch", None) if lora_load_capable else None
+        getattr(server_args, "max_loras_per_batch", None)
+        if (serves_lora_load and lora_enabled)
+        else None
     )
 
     try:
@@ -417,6 +421,7 @@ async def register_model_with_readiness_gate(
     readiness_gate: Optional[asyncio.Event] = None,
     worker_type: Optional[WorkerType] = None,
     needs: Optional[List[List[WorkerType]]] = None,
+    serves_lora_load: bool = False,
 ) -> None:
     """Wrapper function to register LLM with the Dynamo runtime and use optional readiness gate to signal success.
 
@@ -443,6 +448,7 @@ async def register_model_with_readiness_gate(
         output_type,
         worker_type=worker_type,
         needs=needs,
+        serves_lora_load=serves_lora_load,
     )
     if not registration_success:
         logging.error("Model registration failed; shutting down")
