@@ -1040,6 +1040,7 @@ class BaseWorkerHandler(LoraMixin, RLMixin, BaseGenerativeHandler[RequestT, Resp
                 return {"structural_tag": serialize_structural_tag(structural_tag)}
         return {}
 
+    @staticmethod
     def _reasoning_kwargs(request: Dict[str, Any]) -> Dict[str, Any]:
         """Forward Dynamo-resolved reasoning mode to SGLang generation."""
         require_reasoning = request.get("require_reasoning")
