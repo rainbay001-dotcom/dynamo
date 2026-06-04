@@ -47,6 +47,7 @@ async def worker() -> None:
             else "none"
         ),
     )
+    logger.info("Scratch config: scratch_size=%d MiB", config.scratch_size // (1 << 20))
 
     server = GMSRPCServer(
         config.socket_path,

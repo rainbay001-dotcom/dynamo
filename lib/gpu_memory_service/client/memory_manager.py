@@ -52,6 +52,7 @@ from gpu_memory_service.common.cuda_utils import (
 )
 from gpu_memory_service.common.locks import GrantedLockType, RequestedLockType
 from gpu_memory_service.common.protocol.messages import GetAllocationResponse
+from gpu_memory_service.common.utils import get_scratch_size
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class StaleMemoryLayoutError(Exception):
 
 @dataclass
 class _ScratchMapping:
-    """Per-VA tracking for one scratch-aliased KV allocation.
+    """Per-VA tracking for one scratch-aliased allocation.
 
     n_chunks granules of VA all alias the same physical chunk (scratch_handle).
     One physical page, many virtual mappings. torch.zeros into the range
@@ -94,6 +95,7 @@ class _ScratchMapping:
     aligned_size: int
     n_chunks: int
     tag: str
+    granularity: int
     scratch_handle: int = 0  # 0 after unmap_all_vas drops the physical
 
 
@@ -494,7 +496,7 @@ class GMSClientMemoryManager:
         self.free_va(va)
 
     def unmap_all_vas(self) -> None:
-        """Synchronize + unmap all VAs (real mappings AND deferred-KV scratch).
+        """Synchronize + unmap all VAs (real mappings AND scratch mappings).
         Preserves VA reservations for remap.
         """
         cuda_synchronize()
@@ -658,7 +660,7 @@ class GMSClientMemoryManager:
 
     # ==================== Scratch-aliased mappings ====================
 
-    def create_scratch_mapping(self, size: int, tag: str = "kv_cache") -> int:
+    def create_scratch_mapping(self, tag: str, size: int) -> int:
         """Reserve VA range and back it with ONE aliased physical chunk.
 
         Purely client-local — does not require a GMS server connection.
@@ -673,19 +675,46 @@ class GMSClientMemoryManager:
         Cudagraphs capture VAs, not physical, so the swap is invisible to
         replay.
         """
-        aligned_size = align_to_granularity(size, self.granularity)
-        n_chunks = aligned_size // self.granularity
+        if not tag.strip():
+            raise ValueError("Scratch mappings require an explicit non-empty tag")
 
-        ok, scratch_handle = cumem_create_tolerate_oom(self.granularity, self.device)
+        # Use a coarse scratchpad alias size to keep CUDA VMM mapping/access
+        # metadata bounded when active and shadow TP engines are co-resident.
+        # The scratch size is both the physical scratchpad size and alias
+        # granularity. This only affects temporary client-local scratch pools,
+        # not committed GMS allocations, which continue to use CUDA's reported
+        # granularity.
+        scratch_granularity = get_scratch_size()
+        if scratch_granularity < self.granularity:
+            raise ValueError(
+                "Scratch size must be at least CUDA's allocation granularity: "
+                f"{scratch_granularity} < {self.granularity}"
+            )
+        if scratch_granularity % self.granularity != 0:
+            raise ValueError(
+                "Scratch size must be a multiple of CUDA's allocation granularity: "
+                f"{scratch_granularity} is not divisible by {self.granularity}"
+            )
+        if scratch_granularity & (scratch_granularity - 1):
+            raise ValueError(
+                "Scratch size must be a power of two because it is used as a "
+                f"VA reservation alignment, got {scratch_granularity}"
+            )
+        aligned_size = align_to_granularity(size, scratch_granularity)
+        n_chunks = aligned_size // scratch_granularity
+
+        ok, scratch_handle = cumem_create_tolerate_oom(
+            scratch_granularity, self.device
+        )
         if not ok:
             raise RuntimeError(
-                "cuMemCreate failed to allocate the deferred-KV scratch chunk "
-                f"({self.granularity // (1 << 20)} MiB) on device {self.device}"
+                "cuMemCreate failed to allocate the scratch chunk "
+                f"({scratch_granularity // (1 << 20)} MiB) on device {self.device}"
             )
 
-        va = cumem_address_reserve(aligned_size, self.granularity)
-        for offset in range(0, aligned_size, self.granularity):
-            cumem_map(va + offset, self.granularity, scratch_handle)
+        va = cumem_address_reserve(aligned_size, scratch_granularity)
+        for offset in range(0, aligned_size, scratch_granularity):
+            cumem_map(va + offset, scratch_granularity, scratch_handle)
         cumem_set_access(va, aligned_size, self.device, GrantedLockType.RW)
 
         self._scratch_mappings[va] = _ScratchMapping(
@@ -693,19 +722,20 @@ class GMSClientMemoryManager:
             aligned_size=aligned_size,
             n_chunks=n_chunks,
             tag=tag,
+            granularity=scratch_granularity,
             scratch_handle=scratch_handle,
         )
         logger.info(
             "[GMS] Reserved %d MiB VA at 0x%x, aliased 1x %d MiB scratch across %d granules",
             aligned_size // (1 << 20),
             va,
-            self.granularity // (1 << 20),
+            scratch_granularity // (1 << 20),
             n_chunks,
         )
         return va
 
     def prepare_scratch_for_reallocation(self) -> None:
-        """Migrate deferred-KV entries into _mappings as preserved-VA records.
+        """Migrate scratch entries into _mappings as preserved-VA records.
 
         Pre-condition: scratch was already torn down by unmap_all_vas during
         sleep, so every entry's scratch_handle == 0. Each entry becomes a
@@ -736,12 +766,11 @@ class GMSClientMemoryManager:
             )
 
     def destroy_scratch_mapping(self, base_va: int) -> bool:
-        """Tear down a deferred-KV scratch entry.
+        """Tear down a scratch entry.
 
         Called from _gms_free when freeing a VA tracked in _scratch_mappings.
-        Returns True if the VA was a deferred-KV entry and was destroyed,
-        False if the VA was not tracked (caller falls through to
-        destroy_mapping).
+        Returns True if the VA was a scratch entry and was destroyed, False if
+        the VA was not tracked (caller falls through to destroy_mapping).
         """
         scratch = self._scratch_mappings.pop(base_va, None)
         if scratch is None:

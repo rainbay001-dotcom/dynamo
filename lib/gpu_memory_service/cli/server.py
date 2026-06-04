@@ -11,13 +11,20 @@ or until a child exits.
 
 from __future__ import annotations
 
+import argparse
 import logging
+import os
 import signal
 import subprocess
 import sys
 import time
 
 from gpu_memory_service.common.cuda_utils import list_devices
+from gpu_memory_service.common.utils import (
+    DEFAULT_SCRATCH_SIZE,
+    ENV_SCRATCH_SIZE,
+    parse_byte_size,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +35,39 @@ logger = logging.getLogger(__name__)
 _TAGS = ("weights", "kv_cache")
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Launch per-device GPU Memory Service servers.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--scratch-size",
+        type=parse_byte_size,
+        default=None,
+        help=(
+            "Client-local scratchpad size for scratch aliases. This value is "
+            "also used as the scratch alias granularity. Defaults to 256MiB "
+            "unless DYN_GMS_SCRATCH_SIZE is set."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
+    scratch_size = args.scratch_size
+    if scratch_size is None:
+        scratch_raw = os.environ.get(ENV_SCRATCH_SIZE, "").strip()
+        if scratch_raw:
+            try:
+                scratch_size = parse_byte_size(scratch_raw)
+            except ValueError as exc:
+                raise SystemExit(f"{ENV_SCRATCH_SIZE}: {exc}") from exc
+        else:
+            scratch_size = DEFAULT_SCRATCH_SIZE
+    os.environ[ENV_SCRATCH_SIZE] = str(scratch_size)
+    logger.info("Scratch config: scratch_size=%d MiB", scratch_size // (1 << 20))
+
     devices = list_devices()
     processes = []
     for device in devices:

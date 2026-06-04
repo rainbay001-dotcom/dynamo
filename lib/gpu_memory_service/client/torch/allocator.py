@@ -51,7 +51,7 @@ def _gms_malloc(size: int, device: int, stream: int) -> int:
         raise RuntimeError(f"Unknown GMS allocation tag: {tag}")
 
     if state.is_scratch:
-        va = state.manager.create_scratch_mapping(size=int(size), tag=tag)
+        va = state.manager.create_scratch_mapping(tag, int(size))
         logger.debug("[GMS] scratch malloc(tag=%s): va=0x%x size=%d", tag, va, size)
         return va
 

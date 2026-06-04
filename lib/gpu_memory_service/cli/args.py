@@ -5,10 +5,16 @@
 
 import argparse
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
-from gpu_memory_service.common.utils import get_socket_path
+from gpu_memory_service.common.utils import (
+    DEFAULT_SCRATCH_SIZE,
+    ENV_SCRATCH_SIZE,
+    get_socket_path,
+    parse_byte_size,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +28,7 @@ class Config:
     socket_path: str
     alloc_retry_interval: float
     alloc_retry_timeout: Optional[float]
+    scratch_size: int
     verbose: bool
 
 
@@ -68,6 +75,16 @@ def parse_args() -> Config:
         help="Max seconds to wait for allocation retries before failing (default: 60.0). "
         "Pass an explicit large value if you need essentially-unbounded retry.",
     )
+    parser.add_argument(
+        "--scratch-size",
+        type=parse_byte_size,
+        default=None,
+        help=(
+            "Client-local scratchpad size for scratch aliases. This value is "
+            "also used as the scratch alias granularity. Supports byte values or "
+            "KiB/MiB/GiB suffixes (default: 256MiB)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -77,6 +94,17 @@ def parse_args() -> Config:
         parser.error("--alloc-retry-interval must be > 0")
     if args.alloc_retry_timeout is not None and args.alloc_retry_timeout <= 0:
         parser.error("--alloc-retry-timeout must be > 0 when set")
+    scratch_size = args.scratch_size
+    if scratch_size is None:
+        scratch_raw = os.environ.get(ENV_SCRATCH_SIZE, "").strip()
+        if scratch_raw:
+            try:
+                scratch_size = parse_byte_size(scratch_raw)
+            except ValueError as exc:
+                parser.error(f"{ENV_SCRATCH_SIZE}: {exc}")
+        else:
+            scratch_size = DEFAULT_SCRATCH_SIZE
+    os.environ[ENV_SCRATCH_SIZE] = str(scratch_size)
 
     return Config(
         device=args.device,
@@ -84,5 +112,6 @@ def parse_args() -> Config:
         socket_path=socket_path,
         alloc_retry_interval=args.alloc_retry_interval,
         alloc_retry_timeout=args.alloc_retry_timeout,
+        scratch_size=scratch_size,
         verbose=args.verbose,
     )

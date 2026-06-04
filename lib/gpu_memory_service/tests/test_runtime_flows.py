@@ -358,6 +358,78 @@ def test_rw_disconnect_aborts_layout_and_next_writer_starts_clean(running_gms):
 
 
 @pytest.mark.timeout(_SOCKET_TEST_TIMEOUT_SECONDS)
+def test_scratch_mapping_uses_configured_scratch_size(running_gms, monkeypatch):
+    _server, socket_path = running_gms
+    driver_granularity = 4096
+    scratch_size = 128 * 1024 * 1024
+    mapped_chunks: list[tuple[int, int, int]] = []
+    reserved: list[tuple[int, int]] = []
+    created: list[tuple[int, int]] = []
+
+    monkeypatch.setenv("DYN_GMS_SCRATCH_SIZE", str(scratch_size))
+    monkeypatch.setattr(client_memory_manager, "cuda_ensure_initialized", lambda: None)
+    monkeypatch.setattr(
+        client_memory_manager,
+        "cumem_get_allocation_granularity",
+        lambda _device: driver_granularity,
+    )
+
+    def record_create(size: int, device: int) -> tuple[bool, int]:
+        created.append((size, device))
+        return True, 12345
+
+    def record_reserve(size: int, align: int) -> int:
+        reserved.append((size, align))
+        return 0xABC000
+
+    def record_map(va: int, size: int, handle: int) -> None:
+        mapped_chunks.append((va, size, handle))
+
+    monkeypatch.setattr(
+        client_memory_manager, "cumem_create_tolerate_oom", record_create
+    )
+    monkeypatch.setattr(client_memory_manager, "cumem_address_reserve", record_reserve)
+    monkeypatch.setattr(client_memory_manager, "cumem_map", record_map)
+    monkeypatch.setattr(client_memory_manager, "cumem_set_access", lambda *args: None)
+
+    manager = GMSClientMemoryManager(socket_path, device=0)
+    try:
+        va = manager.create_scratch_mapping(
+            "weights",
+            scratch_size + 1,
+        )
+        assert va == 0xABC000
+        assert created == [(scratch_size, 0)]
+        assert reserved == [(2 * scratch_size, scratch_size)]
+        assert mapped_chunks == [
+            (0xABC000, scratch_size, 12345),
+            (0xABC000 + scratch_size, scratch_size, 12345),
+        ]
+
+        scratch = manager._scratch_mappings[va]
+        assert scratch.aligned_size == 2 * scratch_size
+        assert scratch.granularity == scratch_size
+        assert scratch.n_chunks == 2
+        assert scratch.tag == "weights"
+
+        with pytest.raises(ValueError, match="explicit non-empty tag"):
+            manager.create_scratch_mapping("", 4096)
+        with pytest.raises(ValueError, match="explicit non-empty tag"):
+            manager.create_scratch_mapping(" ", 4096)
+    finally:
+        manager._scratch_mappings.clear()
+        manager.close()
+
+
+def test_default_scratch_size_is_256_mib(monkeypatch):
+    from gpu_memory_service.common import utils
+
+    monkeypatch.delenv(utils.ENV_SCRATCH_SIZE, raising=False)
+
+    assert utils.get_scratch_size() == 256 * 1024 * 1024
+
+
+@pytest.mark.timeout(_SOCKET_TEST_TIMEOUT_SECONDS)
 def test_rw_or_ro_grants_rw_from_empty_and_ro_from_committed(running_gms):
     server, socket_path = running_gms
 
