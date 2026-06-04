@@ -36,6 +36,8 @@ type KubeSchemaDocument = {
   resource?: string;
   lines: KubeSchemaLine[];
   fields: KubeSchemaField[];
+  truncated?: boolean;
+  truncationDepth?: number;
 };
 
 type KubeSchemaDocProps = {
@@ -184,7 +186,9 @@ export function KubeSchemaDoc({ data, filtering = true }: KubeSchemaDocProps) {
       <style>{styles}</style>
       <div className="kdoc-fern-toolbar">
         {filtering && filter ? <div className="kdoc-fern-filter">filter: {filter}</div> : <div />}
-        <span className="kdoc-fern-hint">up/down focus, left/right fold, enter toggle, type to filter</span>
+        <span className="kdoc-fern-hint">
+          {data.truncated ? `schema preview truncated at depth ${data.truncationDepth ?? "?"}` : "up/down focus, left/right fold, enter toggle, type to filter"}
+        </span>
       </div>
       <div className="kdoc-fern-layout">
         <section className="kdoc-fern-tree" role="tree" aria-label={`${data.kind} YAML schema`}>
