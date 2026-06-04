@@ -35,6 +35,7 @@ export type KubeSchemaDocument = {
   kind: string;
   resource?: string;
   complete?: boolean;
+  fullPayloadURL?: string;
   lines: KubeSchemaLine[];
   fields: KubeSchemaField[];
 };
@@ -45,41 +46,77 @@ type KubeSchemaDocProps = {
   onLoadFull?: () => void;
 };
 
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+function resolveSchemaSource(source: string) {
+  if (source.startsWith("http://") || source.startsWith("https://") || source.startsWith("/")) {
+    return source;
+  }
+
+  return new URL(source, window.location.href.replace(/\/$/, "")).toString();
+}
+
+function decodeBase64UTF8(value: string) {
+  const bytes = Uint8Array.from(atob(value.replace(/\s+/g, "")), (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function parseSchemaPayload(payload: string): KubeSchemaDocument {
+  const encodedMatch = payload.match(/```kubectl-doc-schema\s*([\s\S]*?)\s*```/);
+  if (encodedMatch) {
+    return JSON.parse(decodeBase64UTF8(encodedMatch[1])) as KubeSchemaDocument;
+  }
+
+  const jsonMatch = payload.match(/```json\s*([\s\S]*?)\s*```/);
+  return JSON.parse(jsonMatch ? jsonMatch[1] : payload) as KubeSchemaDocument;
+}
+
 export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchemaDocProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<HTMLElement>(null);
   const dataKeyRef = useRef("");
-  const [expanded, setExpanded] = useState<Record<number, boolean>>(() => initialExpanded(data.lines));
-  const [focusedId, setFocusedId] = useState(() => firstFocusableLine(data.lines)?.detailId ?? "");
+  const loadingFullRef = useRef(false);
+  const [loadedData, setLoadedData] = useState<KubeSchemaDocument | null>(null);
+  const activeData = loadedData ?? data;
+  const [expanded, setExpanded] = useState<Record<number, boolean>>(() => initialExpanded(activeData.lines));
+  const [focusedId, setFocusedId] = useState(() => firstFocusableLine(activeData.lines)?.detailId ?? "");
   const [filter, setFilter] = useState("");
   const [hasFocus, setHasFocus] = useState(false);
   const [detailsStyle, setDetailsStyle] = useState<CSSProperties | undefined>();
 
   useEffect(() => {
-    const dataKey = `${data.apiVersion}/${data.kind}`;
+    setLoadedData(null);
+    loadingFullRef.current = false;
+  }, [data]);
+
+  useEffect(() => {
+    const dataKey = `${activeData.apiVersion}/${activeData.kind}`;
     if (dataKeyRef.current === dataKey) {
-      setExpanded((current) => ({ ...initialExpanded(data.lines), ...current }));
+      setExpanded((current) => ({ ...initialExpanded(activeData.lines), ...current }));
       return;
     }
 
     dataKeyRef.current = dataKey;
-    setExpanded(initialExpanded(data.lines));
-    setFocusedId(firstFocusableLine(data.lines)?.detailId ?? "");
+    setExpanded(initialExpanded(activeData.lines));
+    setFocusedId(firstFocusableLine(activeData.lines)?.detailId ?? "");
     setFilter("");
-  }, [data]);
+  }, [activeData]);
 
   const fieldsById = useMemo(() => {
     const fields = new Map<string, KubeSchemaField>();
-    for (const field of data.fields) {
+    for (const field of activeData.fields) {
       fields.set(field.id, field);
     }
     return fields;
-  }, [data.fields]);
+  }, [activeData.fields]);
 
   const normalizedFilter = filter.trim().toLowerCase();
   const visibleLines = useMemo(
-    () => visibleSchemaLines(data.lines, expanded, normalizedFilter, fieldsById),
-    [data.lines, expanded, normalizedFilter, fieldsById],
+    () => visibleSchemaLines(activeData.lines, expanded, normalizedFilter, fieldsById),
+    [activeData.lines, expanded, normalizedFilter, fieldsById],
   );
   const focusableLines = useMemo(() => visibleLines.filter(isFocusableLine), [visibleLines]);
 
@@ -144,12 +181,52 @@ export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchema
     };
   }, [showDetails, updateDetailsPosition, visibleLines.length]);
 
+  const loadFull = useCallback(() => {
+    if (activeData.complete) {
+      return;
+    }
+    if (onLoadFull) {
+      onLoadFull();
+      return;
+    }
+    if (!activeData.fullPayloadURL || loadingFullRef.current) {
+      return;
+    }
+
+    loadingFullRef.current = true;
+    fetch(resolveSchemaSource(activeData.fullPayloadURL))
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        return response.text();
+      })
+      .then((payload) => setLoadedData(parseSchemaPayload(payload)))
+      .catch((loadError: unknown) => {
+        loadingFullRef.current = false;
+        console.error("kubectl-doc schema failed to load", loadError);
+      });
+  }, [activeData, onLoadFull]);
+
+  useEffect(() => {
+    if (activeData.complete || (!activeData.fullPayloadURL && !onLoadFull)) {
+      return;
+    }
+
+    const idleWindow = window as IdleWindow;
+    const idleCallback = idleWindow.requestIdleCallback ?? ((callback: () => void) => window.setTimeout(callback, 1500));
+    const cancelIdleCallback = idleWindow.cancelIdleCallback ?? ((handle: number) => window.clearTimeout(handle));
+
+    const handle = idleCallback(() => loadFull());
+    return () => cancelIdleCallback(handle);
+  }, [activeData, loadFull, onLoadFull]);
+
   function toggleLine(line: KubeSchemaLine) {
     if (!line.foldable) {
       return;
     }
-    if (!data.complete && !lineExpanded(line, expanded)) {
-      onLoadFull?.();
+    if (!activeData.complete && !lineExpanded(line, expanded)) {
+      loadFull();
     }
     setExpanded((current) => ({ ...current, [line.index]: !lineExpanded(line, current) }));
   }
@@ -201,8 +278,8 @@ export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchema
         return;
       case "ArrowRight":
         if (current?.foldable && !lineExpanded(current, expanded)) {
-          if (!data.complete) {
-            onLoadFull?.();
+          if (!activeData.complete) {
+            loadFull();
           }
           setExpanded((state) => ({ ...state, [current.index]: true }));
         } else {
@@ -234,8 +311,8 @@ export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchema
         return;
       default:
         if (filtering && event.key.length === 1 && !event.shiftKey) {
-          if (!data.complete) {
-            onLoadFull?.();
+          if (!activeData.complete) {
+            loadFull();
           }
           setFilter((value) => value + event.key);
           event.preventDefault();
@@ -251,7 +328,7 @@ export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchema
       onFocusCapture={() => setHasFocus(true)}
       onBlurCapture={onBlur}
       onKeyDown={onKeyDown}
-      aria-label={`${data.kind} schema`}
+      aria-label={`${activeData.kind} schema`}
     >
       <style>{styles}</style>
       <div className="kdoc-fern-toolbar">
@@ -262,7 +339,7 @@ export function KubeSchemaDoc({ data, filtering = true, onLoadFull }: KubeSchema
         <span className="kdoc-fern-hint">up/down focus, left/right fold, enter toggle, type to filter</span>
       </div>
       <div className="kdoc-fern-layout">
-        <section ref={treeRef} className="kdoc-fern-tree" role="tree" aria-label={`${data.kind} YAML schema`}>
+        <section ref={treeRef} className="kdoc-fern-tree" role="tree" aria-label={`${activeData.kind} YAML schema`}>
           {visibleLines.map((line) => (
             <SchemaLine
               key={`${line.index}-${line.detailId ?? ""}`}
