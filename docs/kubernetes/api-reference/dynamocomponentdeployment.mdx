@@ -2,7 +2,7 @@
 title: "DynamoComponentDeployment"
 ---
 
-import { DynamoComponentDeploymentSchema0, DynamoComponentDeploymentSchema1 } from "@/components/kubectl-doc/generated/DynamoComponentDeploymentSchemas";
+import { LazyKubeSchemaDoc } from "@/components/kubectl-doc/LazyKubeSchemaDoc";
 
 
 # DynamoComponentDeployment
@@ -20,7 +20,7 @@ import { DynamoComponentDeploymentSchema0, DynamoComponentDeploymentSchema1 } fr
 
   <Accordion title={"YAML"} defaultOpen={true}>
 
-    <DynamoComponentDeploymentSchema0 />
+    <LazyKubeSchemaDoc name={"DynamoComponentDeploymentSchema0"} />
 
   </Accordion>
 
@@ -31,7 +31,7 @@ import { DynamoComponentDeploymentSchema0, DynamoComponentDeploymentSchema1 } fr
 
   <Accordion title={"YAML"} defaultOpen={true}>
 
-    <DynamoComponentDeploymentSchema1 />
+    <LazyKubeSchemaDoc name={"DynamoComponentDeploymentSchema1"} />
 
   </Accordion>
 
