@@ -1,0 +1,163 @@
+# Default CSP (override at render time: --set csp=gke-roce)
+csp: aws-efa
+
+# ---- shared across every variant (the "_base") ----
+model: Qwen/Qwen3-32B
+image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1
+gpuMemUtil: "0.90"
+baseEnv:
+  - { name: NIXL_TELEMETRY_ENABLE,          value: "y" }
+  - { name: NIXL_TELEMETRY_EXPORTER,        value: "prometheus" }
+  - { name: NIXL_TELEMETRY_PROMETHEUS_PORT, value: "19090" }
+  - { name: DYN_HEALTH_CHECK_ENABLED,       value: "false" }
+  - { name: HF_HOME,                        value: /shared-models }
+  - { name: VLLM_LOGGING_LEVEL,             value: "INFO" }
+benchResources:
+  requests: { cpu: "8",  memory: 16Gi }
+  limits:   { cpu: "16", memory: 32Gi }
+
+# ---- per-CSP deltas — this is the entire "what differs per provider" surface ----
+csps:
+  aws-efa:
+    name: q32b-1p1d-efa
+    image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1-efa-amd64
+    kvBackend: LIBFABRIC
+    rdma: { vpc.amazonaws.com/efa: "32" }
+    workerEnv:
+      - { name: DYN_KVBM_NIXL_BACKEND_LIBFABRIC, value: "true" }
+      - { name: DYN_KVBM_NIXL_BACKEND_UCX,       value: "false" }
+      - { name: FI_PROVIDER,                     value: "efa" }
+      - { name: FI_EFA_USE_DEVICE_RDMA,          value: "1" }
+      - { name: FI_EFA_ENABLE_SHM_TRANSFER,      value: "0" }
+      - { name: FI_LOG_LEVEL,                    value: "warn" }
+      - { name: LD_LIBRARY_PATH,                 value: "/opt/nvidia/nvda_nixl/lib64:/opt/amazon/efa/lib:/opt/amazon/efa/lib64:/usr/local/lib" }
+      - { name: PATH,                            value: "/opt/dynamo/venv/bin:/opt/amazon/efa/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }
+      - { name: NCCL_DEBUG,                      value: "WARN" }
+    # EFA libs ship in the image; model cache uses the operator service-level mount.
+
+  nscale-ib:
+    name: q32b-1p1d-nscale-ib
+    gpuMemUtil: "0.70"
+    rdma: { rdma/ib: "1" }
+    workerTolerations:
+      - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    workerEnv:
+      - { name: UCX_NET_DEVICES, value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_10:1,mlx5_11:1" }
+      - { name: MX_RDMA_NIC_PIN, value: "auto" }
+      - { name: NIXL_LOG_LEVEL,  value: "INFO" }
+    decodeEnvExtra:
+      - { name: NCCL_DEBUG, value: "WARN" }   # decode-only in the original recipe
+    workerVolumes:
+      - { name: ib,  hostPath: { path: /dev/infiniband } }
+      - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+    workerVolumeMounts:
+      - { name: ib,  mountPath: /dev/infiniband }
+      - { name: shm, mountPath: /dev/shm }
+
+  aks-ib:
+    name: q32b-1p1d-aks-ib
+    rdma: { rdma/shared_ib: "1" }
+    workerTolerations:
+      - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    workerEnv:
+      - { name: UCX_NET_DEVICES,        value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1" }
+      - { name: UCX_IB_GPU_DIRECT_RDMA, value: "yes" }
+      - { name: NCCL_IB_HCA,            value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+      - { name: NCCL_IB_DISABLE,        value: "0" }
+      - { name: NCCL_SOCKET_IFNAME,     value: "eth0" }
+      - { name: NCCL_DEBUG,             value: "WARN" }
+    decodeEnvExtra:
+      - { name: NCCL_IB_GID_INDEX, value: "3" }   # decode-only in the original recipe
+    workerVolumes:
+      - { name: ib, hostPath: { path: /dev/infiniband } }
+    workerVolumeMounts:
+      - { name: ib, mountPath: /dev/infiniband }
+    frontendTolerations:
+      - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    frontendEphemeralStorage: "30Gi"
+
+  nebius-ib:
+    name: q32b-1p1d-nebius-ib
+    rdma: { rdma/ib: "1" }
+    frontendModelMount: explicit   # frontend runs as root w/ explicit mount
+    frontendRunAsRoot: true
+    workerEnv:
+      - { name: UCX_NET_DEVICES,        value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_6:1,mlx5_7:1" }
+      - { name: UCX_IB_GPU_DIRECT_RDMA, value: "yes" }
+      - { name: NCCL_IB_HCA,            value: "mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7" }
+      - { name: NCCL_IB_DISABLE,        value: "0" }
+      - { name: NCCL_SOCKET_IFNAME,     value: "eth0" }
+      - { name: NCCL_DEBUG,             value: "WARN" }
+    decodeEnvExtra:
+      - { name: UCX_RNDV_THRESH, value: "8192" }   # decode-only in the original recipe
+    workerVolumes:
+      - { name: ib,  hostPath: { path: /dev/infiniband } }
+      - { name: shm, emptyDir: { medium: Memory, sizeLimit: 64Gi } }
+    workerVolumeMounts:
+      - { name: ib,  mountPath: /dev/infiniband }
+      - { name: shm, mountPath: /dev/shm }
+
+  gke-roce:
+    name: q32b-1p1d-gke-roce
+    workerModelMount: explicit       # operator mount gets overridden once volumes are set
+    frontendModelMount: explicit
+    imagePullSecret: nvcr-pull-secret
+    rdma:
+      networking.gke.io.networks/rdma-0: "1"
+      networking.gke.io.networks/rdma-1: "1"
+      networking.gke.io.networks/rdma-2: "1"
+      networking.gke.io.networks/rdma-3: "1"
+      networking.gke.io.networks/rdma-0.IP: "1"
+      networking.gke.io.networks/rdma-1.IP: "1"
+      networking.gke.io.networks/rdma-2.IP: "1"
+      networking.gke.io.networks/rdma-3.IP: "1"
+    workerEnv:
+      - { name: UCX_NET_DEVICES,    value: "mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1" }
+      - { name: NCCL_SOCKET_IFNAME, value: "eth0" }
+      - { name: NCCL_CROSS_NIC,     value: "0" }
+      - { name: LD_LIBRARY_PATH,    value: "/opt/nvidia/nvda_nixl/lib64:/usr/local/gib/lib64:/usr/local/nvidia/lib64" }
+      - { name: NCCL_DEBUG,         value: "WARN" }
+    workerVolumes:
+      - { name: gib,    hostPath: { path: /home/kubernetes/bin/gib } }
+      - { name: nvidia, hostPath: { path: /home/kubernetes/bin/nvidia } }
+    workerVolumeMounts:
+      - { name: gib,    mountPath: /usr/local/gib }
+      - { name: nvidia, mountPath: /usr/local/nvidia }
+    nodeSelector:
+      kubernetes.io/arch: arm64
+      nvidia.com/gpu.product: NVIDIA-GB200
+    workerAnnotations:
+      networking.gke.io/default-interface: "eth0"
+      networking.gke.io/interfaces: |
+        [{"interfaceName":"eth0","network":"default"},
+         {"interfaceName":"eth2","network":"rdma-0"},
+         {"interfaceName":"eth3","network":"rdma-1"},
+         {"interfaceName":"eth4","network":"rdma-2"},
+         {"interfaceName":"eth5","network":"rdma-3"}]
+    workerTolerations:
+      - { key: nvidia.com/gpu,                       operator: Exists, effect: NoSchedule }
+      - { key: kubernetes.io/arch,                   operator: Equal, value: arm64, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-0,    operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-1,    operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-2,    operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-3,    operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-0.IP, operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-1.IP, operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-2.IP, operator: Exists, effect: NoSchedule }
+      - { key: networking.gke.io.networks/rdma-3.IP, operator: Exists, effect: NoSchedule }
+    # Rack-level anti-affinity: NVL72 shares NVLink within a rack, which would
+    # short-circuit RoCE. Replaces the default hostname-only anti-affinity.
+    workerAffinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - { key: nvidia.com/dynamo-sub-component-type, operator: In, values: [prefill, decode] }
+          topologyKey: cloud.google.com/gce-topology-block
+        - labelSelector:
+            matchExpressions:
+            - { key: nvidia.com/dynamo-sub-component-type, operator: In, values: [prefill, decode] }
+          topologyKey: kubernetes.io/hostname
+    benchResources:
+      requests: { cpu: "2", memory: 4Gi }
+      limits:   { cpu: "4", memory: 8Gi }

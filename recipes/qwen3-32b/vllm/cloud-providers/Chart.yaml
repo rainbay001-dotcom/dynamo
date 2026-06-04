@@ -1,0 +1,4 @@
+# Minimal chart — helm template requires this file; nothing else chart-like is used.
+apiVersion: v2
+name: q32b-1p1d
+version: 0.0.0

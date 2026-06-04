@@ -1,0 +1,197 @@
+{{- /* ---------- helpers ---------- */ -}}
+{{- define "q32b.kv" -}}
+{{- if eq (.kvBackend | default "") "LIBFABRIC" -}}
+{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}
+{{- else -}}
+{"kv_connector":"NixlConnector","kv_role":"kv_both"}
+{{- end -}}
+{{- end -}}
+
+{{- define "q32b.args" -}}
+- --model
+- {{ .root.Values.model }}
+- --disaggregation-mode
+- {{ .mode }}
+- --kv-transfer-config
+- '{{ include "q32b.kv" .csp }}'
+- --tensor-parallel-size
+- '4'
+- --no-enable-log-requests
+- --gpu-memory-utilization
+- '{{ .csp.gpuMemUtil | default .root.Values.gpuMemUtil }}'
+{{- if eq .mode "decode" }}
+- --no-enable-prefix-caching
+{{- end }}
+- --async-scheduling
+- --block-size
+- '64'
+- --hf-overrides
+- '{"rope_scaling":{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":32768},"max_position_embeddings":131072}'
+- --max-model-len
+- '131072'
+{{- end -}}
+
+{{- define "q32b.workerEnv" -}}
+{{ toYaml .root.Values.baseEnv }}
+{{- with .csp.workerEnv }}
+{{ toYaml . }}
+{{- end }}
+{{- if eq .mode "decode" }}
+{{- with .csp.decodeEnvExtra }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "q32b.worker" -}}
+{{- $csp := .csp -}}
+{{- $explicit := eq ($csp.workerModelMount | default "service") "explicit" -}}
+componentType: worker
+envFromSecret: hf-token-secret
+extraPodMetadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "19090"
+    prometheus.io/path: "/metrics"
+{{- with $csp.workerAnnotations }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+extraPodSpec:
+{{- with $csp.nodeSelector }}
+  nodeSelector:
+{{ toYaml . | indent 4 }}
+{{- end }}
+{{- if $csp.imagePullSecret }}
+  imagePullSecrets:
+  - name: {{ $csp.imagePullSecret }}
+{{- end }}
+{{- with $csp.workerTolerations }}
+  tolerations:
+{{ toYaml . | indent 2 }}
+{{- end }}
+  affinity:
+{{- if $csp.workerAffinity }}
+{{ toYaml $csp.workerAffinity | indent 4 }}
+{{- else }}
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - { key: nvidia.com/dynamo-component-type, operator: In, values: [worker] }
+        topologyKey: kubernetes.io/hostname
+{{- end }}
+  mainContainer:
+    command: [python3, -m, dynamo.vllm]
+    image: {{ $csp.image | default .root.Values.image }}
+    workingDir: /workspace
+    args:
+{{ include "q32b.args" (dict "csp" $csp "mode" .mode "root" .root) | indent 4 }}
+    securityContext:
+      privileged: true
+      runAsUser: 0
+      capabilities:
+        add: [IPC_LOCK, SYS_PTRACE]
+    env:
+{{ include "q32b.workerEnv" (dict "csp" $csp "mode" .mode "root" .root) | indent 4 }}
+{{- if or $explicit $csp.workerVolumeMounts }}
+    volumeMounts:
+{{- if $explicit }}
+    - { name: shared-model-cache, mountPath: /shared-models }
+{{- end }}
+{{- with $csp.workerVolumeMounts }}
+{{ toYaml . | indent 4 }}
+{{- end }}
+{{- end }}
+{{- if or $explicit $csp.workerVolumes }}
+  volumes:
+{{- if $explicit }}
+  - { name: shared-model-cache, persistentVolumeClaim: { claimName: shared-model-cache } }
+{{- end }}
+{{- with $csp.workerVolumes }}
+{{ toYaml . | indent 2 }}
+{{- end }}
+{{- end }}
+replicas: 1
+resources:
+  limits:
+    gpu: '4'
+{{- with $csp.rdma }}
+    custom:
+{{ toYaml . | indent 6 }}
+{{- end }}
+  requests:
+    gpu: '4'
+    custom:
+      ephemeral-storage: "2Gi"
+{{- with $csp.rdma }}
+{{ toYaml . | indent 6 }}
+{{- end }}
+subComponentType: {{ .mode }}
+{{- if not $explicit }}
+volumeMounts:
+- { name: shared-model-cache, mountPoint: /shared-models }
+{{- end }}
+{{- end -}}
+
+{{- define "q32b.frontend" -}}
+{{- $csp := .csp -}}
+{{- $explicit := eq ($csp.frontendModelMount | default "service") "explicit" -}}
+componentType: frontend
+envs:
+  - name: HF_HOME
+    value: /shared-models
+extraPodSpec:
+{{- if $csp.imagePullSecret }}
+  imagePullSecrets:
+  - name: {{ $csp.imagePullSecret }}
+{{- end }}
+{{- with $csp.frontendTolerations }}
+  tolerations:
+{{ toYaml . | indent 2 }}
+{{- end }}
+  mainContainer:
+    image: {{ $csp.image | default .root.Values.image }}
+    workingDir: /workspace
+{{- if $csp.frontendRunAsRoot }}
+    securityContext:
+      runAsUser: 0
+{{- end }}
+{{- if $explicit }}
+    volumeMounts:
+    - { name: shared-model-cache, mountPath: /shared-models }
+  volumes:
+  - { name: shared-model-cache, persistentVolumeClaim: { claimName: shared-model-cache } }
+{{- end }}
+replicas: 1
+resources:
+  requests:
+    cpu: "4"
+{{- with $csp.frontendEphemeralStorage }}
+    custom:
+      ephemeral-storage: {{ . | quote }}
+{{- end }}
+  limits: { cpu: "8" }
+subComponentType: null
+{{- if not $explicit }}
+volumeMounts:
+- { name: shared-model-cache, mountPoint: /shared-models }
+{{- end }}
+{{- end -}}
+
+{{- /* ---------- resource ---------- */ -}}
+{{- $csp := index .Values.csps .Values.csp -}}
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: {{ $csp.name }}
+spec:
+  pvcs:
+  - create: false
+    name: shared-model-cache
+  services:
+    Frontend:
+      {{- include "q32b.frontend" (dict "csp" $csp "root" $) | nindent 6 }}
+    VllmPrefillWorker:
+      {{- include "q32b.worker" (dict "csp" $csp "mode" "prefill" "root" $) | nindent 6 }}
+    VllmDecodeWorker:
+      {{- include "q32b.worker" (dict "csp" $csp "mode" "decode" "root" $) | nindent 6 }}

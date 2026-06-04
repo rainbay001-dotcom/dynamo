@@ -97,6 +97,8 @@ Each complete recipe follows this standard structure:
         └── perf.yaml (optional)  # AIPerf benchmark job
 ```
 
+Some closely-related families are instead a small **Helm template** (one chart template + a flat per-variant block in `values.yaml`), rendered with `helm template <name> <dir> --set <selector>=<variant> | kubectl apply -f -` instead of `kubectl apply -f deploy.yaml`. See [`qwen3-32b/vllm/cloud-providers/`](qwen3-32b/vllm/cloud-providers/) (one base template + one `values.yaml` block per cloud provider).
+
 ## Quick Start
 
 ### Prerequisites
