@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 
-type KubeSchemaLine = {
+export type KubeSchemaLine = {
   index: number;
   text: string;
   description?: string;
@@ -19,7 +19,7 @@ type KubeSchemaLine = {
   filterText?: string;
 };
 
-type KubeSchemaField = {
+export type KubeSchemaField = {
   id: string;
   path: string;
   type: string;
@@ -28,7 +28,7 @@ type KubeSchemaField = {
   metadata?: string[];
 };
 
-type KubeSchemaDocument = {
+export type KubeSchemaDocument = {
   apiVersion: string;
   group: string;
   version: string;

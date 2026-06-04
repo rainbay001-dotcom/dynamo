@@ -1,47 +1,60 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ComponentType } from "react";
 
-type SchemaComponent = ComponentType;
-type SchemaLoader = () => Promise<SchemaComponent>;
+import { KubeSchemaDoc } from "./KubeSchemaDoc";
+import type { KubeSchemaDocument } from "./KubeSchemaDoc";
 
-const schemaLoaders: Record<string, SchemaLoader> = {
-  DynamoCheckpointSchema0: () => import("./generated/DynamoCheckpointSchemas").then((module) => module.DynamoCheckpointSchema0),
-  DynamoComponentDeploymentSchema0: () => import("./generated/DynamoComponentDeploymentSchemas").then((module) => module.DynamoComponentDeploymentSchema0),
-  DynamoComponentDeploymentSchema1: () => import("./generated/DynamoComponentDeploymentSchemas").then((module) => module.DynamoComponentDeploymentSchema1),
-  DynamoGraphDeploymentRequestSchema0: () => import("./generated/DynamoGraphDeploymentRequestSchemas").then((module) => module.DynamoGraphDeploymentRequestSchema0),
-  DynamoGraphDeploymentRequestSchema1: () => import("./generated/DynamoGraphDeploymentRequestSchemas").then((module) => module.DynamoGraphDeploymentRequestSchema1),
-  DynamoGraphDeploymentScalingAdapterSchema0: () => import("./generated/DynamoGraphDeploymentScalingAdapterSchemas").then((module) => module.DynamoGraphDeploymentScalingAdapterSchema0),
-  DynamoGraphDeploymentScalingAdapterSchema1: () => import("./generated/DynamoGraphDeploymentScalingAdapterSchemas").then((module) => module.DynamoGraphDeploymentScalingAdapterSchema1),
-  DynamoGraphDeploymentSchema0: () => import("./generated/DynamoGraphDeploymentSchemas").then((module) => module.DynamoGraphDeploymentSchema0),
-  DynamoGraphDeploymentSchema1: () => import("./generated/DynamoGraphDeploymentSchemas").then((module) => module.DynamoGraphDeploymentSchema1),
-  DynamoModelSchema0: () => import("./generated/DynamoModelSchemas").then((module) => module.DynamoModelSchema0),
-  DynamoWorkerMetadataSchema0: () => import("./generated/DynamoWorkerMetadataSchemas").then((module) => module.DynamoWorkerMetadataSchema0),
+const schemaSources: Record<string, string> = {
+  "DynamoCheckpointSchema0": "../../assets/kubectl-doc/generated/DynamoCheckpointSchema0.json",
+  "DynamoComponentDeploymentSchema0": "../../assets/kubectl-doc/generated/DynamoComponentDeploymentSchema0.json",
+  "DynamoComponentDeploymentSchema1": "../../assets/kubectl-doc/generated/DynamoComponentDeploymentSchema1.json",
+  "DynamoGraphDeploymentRequestSchema0": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentRequestSchema0.json",
+  "DynamoGraphDeploymentRequestSchema1": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentRequestSchema1.json",
+  "DynamoGraphDeploymentScalingAdapterSchema0": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentScalingAdapterSchema0.json",
+  "DynamoGraphDeploymentScalingAdapterSchema1": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentScalingAdapterSchema1.json",
+  "DynamoGraphDeploymentSchema0": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentSchema0.json",
+  "DynamoGraphDeploymentSchema1": "../../assets/kubectl-doc/generated/DynamoGraphDeploymentSchema1.json",
+  "DynamoModelSchema0": "../../assets/kubectl-doc/generated/DynamoModelSchema0.json",
+  "DynamoWorkerMetadataSchema0": "../../assets/kubectl-doc/generated/DynamoWorkerMetadataSchema0.json",
 };
 
-export function LazyKubeSchemaDoc({ name }: { name: string }) {
-  const [Component, setComponent] = useState<SchemaComponent | null>(null);
+function resolveSchemaSource(source: string) {
+  if (source.startsWith("http://") || source.startsWith("https://") || source.startsWith("/")) {
+    return source;
+  }
+
+  return new URL(source, window.location.href.replace(/\/$/, "")).toString();
+}
+
+export function LazyKubeSchemaDoc({ name, filtering = true }: { name: string; filtering?: boolean }) {
+  const [data, setData] = useState<KubeSchemaDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const loader = schemaLoaders[name];
+    const source = schemaSources[name];
 
-    setComponent(null);
+    setData(null);
     setError(null);
 
-    if (!loader) {
-      setError(`Unknown schema component: ${name}`);
+    if (!source) {
+      setError(`Unknown schema document: ${name}`);
       return () => {
         cancelled = true;
       };
     }
 
-    loader()
-      .then((loadedComponent) => {
+    fetch(resolveSchemaSource(source))
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        return response.json() as Promise<KubeSchemaDocument>;
+      })
+      .then((schema) => {
         if (!cancelled) {
-          setComponent(() => loadedComponent);
+          setData(schema);
         }
       })
       .catch((loadError: unknown) => {
@@ -59,9 +72,9 @@ export function LazyKubeSchemaDoc({ name }: { name: string }) {
     return <div className="kdoc-fern-lazy kdoc-fern-lazy-error">Schema failed to load: {error}</div>;
   }
 
-  if (!Component) {
+  if (!data) {
     return <div className="kdoc-fern-lazy">Loading schema...</div>;
   }
 
-  return <Component />;
+  return <KubeSchemaDoc data={data} filtering={filtering} />;
 }
