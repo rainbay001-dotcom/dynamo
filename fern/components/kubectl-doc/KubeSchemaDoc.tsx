@@ -676,7 +676,7 @@ function cssEscape(value: string) {
 }
 
 const styles = `
-.kdoc-fern{--kdoc-fg:#1f2933;--kdoc-muted:#57606a;--kdoc-border:#d8dee4;--kdoc-panel:#f6f8fa;--kdoc-selected:#fff7cc;--kdoc-filter:#fb8500;--kdoc-required:#cf222e;--kdoc-ok:#116329;--kdoc-yaml-key:#0550ae;--kdoc-yaml-string:#0a7f42;--kdoc-yaml-comment:#6e7781;--kdoc-yaml-punct:#8c959f;--kdoc-yaml-number:#953800;--kdoc-yaml-type-number:#007c89;--kdoc-yaml-bool:#8250df;color:var(--kdoc-fg);max-width:100%;position:relative}
+.kdoc-fern{--kdoc-fg:#1f2933;--kdoc-muted:#57606a;--kdoc-border:#d8dee4;--kdoc-panel:#f6f8fa;--kdoc-selected:#fff7cc;--kdoc-filter:#fb8500;--kdoc-required:#cf222e;--kdoc-ok:#116329;--kdoc-yaml-key:#0550ae;--kdoc-yaml-string:#0a7f42;--kdoc-yaml-comment:#6e7781;--kdoc-yaml-punct:#8c959f;--kdoc-yaml-number:#953800;--kdoc-yaml-type-number:#007c89;--kdoc-yaml-bool:#8250df;color:var(--kdoc-fg);max-width:100%;position:relative;z-index:2}
 .kdoc-fern *{box-sizing:border-box}
 .kdoc-fern:focus{outline:0}
 .kdoc-fern-toolbar{align-items:center;display:flex;gap:.75rem;justify-content:space-between;margin:0 0 .6rem;min-height:1.8rem}
@@ -703,7 +703,7 @@ const styles = `
 .kdoc-fern-required-label{background:#ffebe9;border:1px solid #ff8182;border-radius:999px;color:var(--kdoc-required);display:inline-block;font-weight:700;line-height:1.1;padding:0 .35em;vertical-align:baseline}
 .kdoc-fern-filter-hit{background:var(--kdoc-filter);border-radius:2px;color:#111;font-weight:700;padding:0 .08em}
 .kdoc-fern-selected .kdoc-fern-yaml{background:var(--kdoc-selected)}
-.kdoc-fern-details{background:#fff;border:1px solid var(--kdoc-border);border-radius:8px;box-shadow:0 8px 28px rgba(31,41,51,.14);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-height:50vh;min-width:0;overflow:auto;padding:12px;position:sticky;scrollbar-gutter:stable;top:calc(var(--header-height,72px) + 1rem);z-index:5}
+.kdoc-fern-details{background:#fff;border:1px solid var(--kdoc-border);border-radius:8px;box-shadow:0 8px 28px rgba(31,41,51,.14);font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin-top:12px;max-height:50vh;min-width:0;overflow:auto;padding:12px;position:sticky;scrollbar-gutter:stable;top:calc(var(--header-height,72px) + 1rem);z-index:30}
 .kdoc-fern-details h2{font-size:16px;line-height:1.25;margin:0 0 10px}
 .kdoc-fern-empty{color:var(--kdoc-muted);margin:0}
 .kdoc-fern-detail-body{display:grid;gap:12px}
@@ -719,7 +719,7 @@ const styles = `
 .kdoc-fern-detail-section h3{color:var(--kdoc-muted);font-size:11px;letter-spacing:.02em;margin:0 0 6px;text-transform:uppercase}
 .kdoc-fern-detail-section p{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .kdoc-fern-detail-section ul{display:grid;gap:4px;margin:0;padding-left:18px}
-@media(min-width:1200px){.kdoc-fern-details{bottom:1rem;max-height:calc(100vh - var(--header-height,72px) - 2rem);position:fixed;right:1rem;top:calc(var(--header-height,72px) + 1rem);width:clamp(260px,22vw,360px)}}
+@media(min-width:1200px){.kdoc-fern-layout{align-items:start;display:grid}.kdoc-fern-tree{grid-area:1/1}.kdoc-fern-details{grid-area:1/1;justify-self:end;margin-top:0;max-height:calc(100vh - var(--header-height,72px) - 2rem);top:calc(var(--header-height,72px) + 1rem);transform:translateX(calc(100% + 1.5rem));width:clamp(260px,22vw,360px)}}
 @media(max-width:900px){.kdoc-fern-details{max-height:50vh}.kdoc-fern-hint{display:none}}
 `;
 
