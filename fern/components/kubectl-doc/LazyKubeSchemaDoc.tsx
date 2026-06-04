@@ -27,9 +27,19 @@ function resolveSchemaSource(source: string) {
   return new URL(source, window.location.href.replace(/\/$/, "")).toString();
 }
 
+function decodeBase64UTF8(value: string) {
+  const bytes = Uint8Array.from(atob(value.replace(/\s+/g, "")), (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 function parseSchemaPayload(payload: string): KubeSchemaDocument {
-  const match = payload.match(/```json\s*([\s\S]*?)\s*```/);
-  return JSON.parse(match ? match[1] : payload) as KubeSchemaDocument;
+  const encodedMatch = payload.match(/```kubectl-doc-schema\s*([\s\S]*?)\s*```/);
+  if (encodedMatch) {
+    return JSON.parse(decodeBase64UTF8(encodedMatch[1])) as KubeSchemaDocument;
+  }
+
+  const jsonMatch = payload.match(/```json\s*([\s\S]*?)\s*```/);
+  return JSON.parse(jsonMatch ? jsonMatch[1] : payload) as KubeSchemaDocument;
 }
 
 export function LazyKubeSchemaDoc({ name, filtering = true }: { name: string; filtering?: boolean }) {
